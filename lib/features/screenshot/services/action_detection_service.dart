@@ -205,30 +205,67 @@ class ActionDetectionService {
       ).hasMatch(text);
 
       if (hasPhone || hasAddress) {
-        final ignoredWords = {
-          'pakistani',
-          'continental',
-          'arabic',
-          'good',
-          'mood',
-          'food',
-          'welcome',
-          'official',
-          'contact',
-          'services',
-          'quality',
-          'delivery',
-          'discount',
-          'sale',
-          'offer',
-          'follow',
-          'subscribe',
-        };
+      
+          final ignoredWords = {
+  'pakistani',
+  'continental',
+  'arabic',
+  'good',
+  'mood',
+  'food',
+  'welcome',
+  'official',
+  'contact',
+  'services',
+  'quality',
+  'delivery',
+  'discount',
+  'sale',
+  'offer',
+  'follow',
+  'subscribe',
+
+  // Event and poster headings
+  'mental',
+  'health',
+  'awareness',
+  'anxiety',
+  'social',
+  'media',
+  'conflict',
+  'resolution',
+  'communication',
+  'depression',
+  'young',
+  'adults',
+  'wellness',
+  'prioritize',
+  'well',
+  'mind',
+  'technique',
+  'techniques',
+  'activities',
+  'demonstration',
+  'struggle',
+  'silence',
+  'resilience',
+  'psychotherapy',
+  'diagnostics',
+  'therapeutic',
+  'mechanics',
+  'support',
+};
+      
 
         for (final line in lines) {
           if (isInvalidLine(line)) continue;
 
           final words = line.split(RegExp(r'\s+'));
+          // Reject incomplete names.
+if (['OF', 'THE', 'AND', 'FOR', 'IN', 'AT']
+    .contains(words.last.toUpperCase())) {
+  continue;
+}
 
           if (words.length < 2 || words.length > 4) {
             continue;
