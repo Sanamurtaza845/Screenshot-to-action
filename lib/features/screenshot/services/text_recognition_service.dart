@@ -14,254 +14,164 @@ class TextRecognitionService {
 
       if (result.blocks.isEmpty) return '';
 
-      final List<_TextLine> lines = [];
-
-      for (final block in result.blocks) {
-        for (final line in block.lines) {
-          final text = _correctOcrText(line.text.trim());
-
-          if (text.isEmpty) continue;
-
-          final box = line.boundingBox;
-
-          lines.add(
-            _TextLine(
-              text: text,
-              left: box.left.toDouble(),
-              top: box.top.toDouble(),
-              right: box.right.toDouble(),
-              bottom: box.bottom.toDouble(),
-            ),
-          );
-        }
-      }
-
-      if (lines.isEmpty) return '';
-
-      final imageWidth = lines
-          .map((line) => line.right)
-          .reduce(max);
-
-      final imageHeight = lines
-          .map((line) => line.bottom)
-          .reduce(max);
-
-      final averageHeight = lines
-              .map((line) => line.height)
-              .reduce((a, b) => a + b) /
-          lines.length;
-
-      // Separate full-width text from column content.
-      final spanningLines = <_TextLine>[];
-      final contentLines = <_TextLine>[];
-
-      for (final line in lines) {
-        if (line.width >= imageWidth * 0.72) {
-          spanningLines.add(line);
-        } else {
-          contentLines.add(line);
-        }
-      }
-
-      spanningLines.sort((a, b) => a.top.compareTo(b.top));
-
-      final output = <String>[];
-
-      double currentTop = 0;
-
-      for (final spanning in spanningLines) {
-        final region = contentLines.where((line) {
-          return line.top >= currentTop &&
-              line.bottom <= spanning.top;
-        }).toList();
-
-        if (region.isNotEmpty) {
-          output.addAll(
-            _readRegion(region, averageHeight),
-          );
-        }
-
-        output.add(spanning.text);
-
-        currentTop = spanning.bottom;
-      }
-
-      final remaining = contentLines.where((line) {
-        return line.top >= currentTop;
-      }).toList();
-
-      if (remaining.isNotEmpty) {
-        output.addAll(
-          _readRegion(remaining, averageHeight),
-        );
-      }
-
-      return output
-          .where((text) => text.trim().isNotEmpty)
-          .join('\n')
-          .trim();
+      return reconstructText(result);
     } finally {
       await recognizer.close();
     }
   }
 
-  List<String> _readRegion(
-    List<_TextLine> lines,
-    double averageHeight,
-  ) {
-    if (lines.isEmpty) return [];
+  /// Reconstructs text from ML Kit RecognizedText while preserving natural reading order,
+  /// tabular alignment, and paragraph structure without scrambling words or columns.
+  String reconstructText(RecognizedText recognizedText) {
+    final rawLines = <RecognizedLineData>[];
 
-    final split = _findColumnSplit(lines, averageHeight);
+    for (final block in recognizedText.blocks) {
+      for (final line in block.lines) {
+        final cleaned = _correctOcrText(line.text.trim());
+        if (cleaned.isEmpty) continue;
 
-    // No reliable column boundary: read normally.
-    if (split == null) {
-      final sorted = [...lines]
-        ..sort((a, b) {
-          final difference = a.top - b.top;
-
-          if (difference.abs() < averageHeight * 0.7) {
-            return a.left.compareTo(b.left);
-          }
-
-          return difference.compareTo(0);
-        });
-
-      return sorted.map((line) => line.text).toList();
-    }
-
-    final leftColumn = lines
-        .where((line) => line.right <= split)
-        .toList();
-
-    final rightColumn = lines
-        .where((line) => line.left >= split)
-        .toList();
-
-    final spanning = lines
-        .where((line) =>
-            line.left < split && line.right > split)
-        .toList();
-
-   if (leftColumn.length < 2 || rightColumn.length < 2) {
-  final sortedLines = [...lines];
-
-  sortedLines.sort(
-    (a, b) => a.top.compareTo(b.top),
-  );
-
-  return sortedLines
-      .map((line) => line.text)
-      .toList();
-}
-
-    leftColumn.sort((a, b) => a.top.compareTo(b.top));
-    rightColumn.sort((a, b) => a.top.compareTo(b.top));
-    spanning.sort((a, b) => a.top.compareTo(b.top));
-
-    // Read the left column completely, then the right column.
-    final result = <String>[
-      ...leftColumn.map((line) => line.text),
-      ...rightColumn.map((line) => line.text),
-    ];
-
-    // Keep any crossing lines rather than losing their text.
-    result.addAll(spanning.map((line) => line.text));
-
-    return result;
-  }
-
-  double? _findColumnSplit(
-    List<_TextLine> lines,
-    double averageHeight,
-  ) {
-    final edges = <double>[];
-
-    for (final line in lines) {
-      edges
-        ..add(line.left)
-        ..add(line.right);
-    }
-
-    edges.sort();
-
-    double? bestSplit;
-    double bestScore = 0;
-
-    for (int i = 0; i < edges.length - 1; i++) {
-      final gap = edges[i + 1] - edges[i];
-
-      if (gap < averageHeight * 1.5) continue;
-
-      final split = (edges[i] + edges[i + 1]) / 2;
-
-      final leftCount = lines.where(
-        (line) => line.right <= split,
-      ).length;
-
-      final rightCount = lines.where(
-        (line) => line.left >= split,
-      ).length;
-
-      final crossingCount = lines.length - leftCount - rightCount;
-
-      if (leftCount < 2 || rightCount < 2) continue;
-
-      // Prefer balanced columns and large whitespace gaps.
-      final balance = min(leftCount, rightCount) /
-          max(leftCount, rightCount);
-
-      final crossingPenalty =
-          crossingCount / lines.length;
-
-      final score = gap *
-          balance *
-          (1 - crossingPenalty);
-
-      if (score > bestScore) {
-        bestScore = score;
-        bestSplit = split;
+        final box = line.boundingBox;
+        rawLines.add(
+          RecognizedLineData(
+            text: cleaned,
+            left: box.left.toDouble(),
+            top: box.top.toDouble(),
+            right: box.right.toDouble(),
+            bottom: box.bottom.toDouble(),
+          ),
+        );
       }
     }
 
-    return bestSplit;
-  }
- String _correctOcrText(String text) {
-  String corrected = text.trim();
+    if (rawLines.isEmpty) return '';
 
-  // Correct AI-related headings.
-  corrected = corrected.replaceAll(
-    RegExp(r'\bAl(?=\s+(CHATBOT|AGENT)\b)', caseSensitive: false),
-    'AI',
-  );
-
-  // Correct isolated AI text.
-  if (RegExp(r'^AL$', caseSensitive: false).hasMatch(corrected)) {
-    corrected = 'AI';
+    return formatLines(rawLines);
   }
 
-  // Correct common OCR mistakes.
-  corrected = corrected.replaceAll(
-    RegExp(r'\bAPls\b', caseSensitive: false),
-    'APIs',
-  );
+  /// Spatially groups lines into horizontal visual rows and orders rows top-to-bottom,
+  /// lines left-to-right within rows, preserving tabular gaps and paragraph breaks.
+  String formatLines(List<RecognizedLineData> rawLines) {
+    if (rawLines.isEmpty) return '';
 
-  corrected = corrected.replaceAll(
-    RegExp(r'\bE\.g,', caseSensitive: false),
-    'E.g.',
-  );
+    // Sort all lines by top coordinate initially
+    final lines = List<RecognizedLineData>.from(rawLines)
+      ..sort((a, b) => a.top.compareTo(b.top));
 
-  return corrected;
+    final rows = <_VisualRow>[];
+
+    for (final line in lines) {
+      _VisualRow? bestMatchingRow;
+      double maxOverlap = 0;
+
+      for (final row in rows) {
+        final overlap = row.verticalOverlap(line);
+        if (overlap > maxOverlap &&
+            overlap >= 0.4 * min(line.height, row.height)) {
+          maxOverlap = overlap;
+          bestMatchingRow = row;
+        }
+      }
+
+      if (bestMatchingRow != null) {
+        bestMatchingRow.addLine(line);
+      } else {
+        rows.add(_VisualRow(line));
+      }
+    }
+
+    // Sort rows from top to bottom
+    rows.sort((a, b) => a.top.compareTo(b.top));
+
+    final buffer = StringBuffer();
+    _VisualRow? previousRow;
+
+    for (final row in rows) {
+      // Sort lines inside each row left to right
+      row.lines.sort((a, b) => a.left.compareTo(b.left));
+
+      // Check vertical gap from previous row for paragraph break
+      if (previousRow != null) {
+        final verticalGap = row.top - previousRow.bottom;
+        final avgHeight = (row.height + previousRow.height) / 2;
+
+        if (verticalGap > avgHeight * 1.3) {
+          // Distinct paragraph / section separation
+          buffer.write('\n\n');
+        } else {
+          buffer.write('\n');
+        }
+      }
+
+      // Format lines inside this row
+      final rowBuffer = StringBuffer();
+      for (int i = 0; i < row.lines.length; i++) {
+        final currentLine = row.lines[i];
+
+        if (i > 0) {
+          final previousLine = row.lines[i - 1];
+          final horizontalGap = currentLine.left - previousLine.right;
+
+          // If there is a noticeable column gap (e.g., receipt or table), insert wider gap
+          if (horizontalGap > row.height * 2.5) {
+            rowBuffer.write('    ');
+          } else {
+            rowBuffer.write(' ');
+          }
+        }
+
+        rowBuffer.write(currentLine.text);
+      }
+
+      buffer.write(rowBuffer.toString().trim());
+      previousRow = row;
+    }
+
+    return buffer.toString().trim();
+  }
+
+  String _correctOcrText(String text) {
+    String corrected = text.trim();
+
+    // Remove zero-width spaces and abnormal control characters
+    corrected = corrected.replaceAll(RegExp(r'[\u200B-\u200D\uFEFF]'), '');
+
+    // Normalize multiple whitespace to single space
+    corrected = corrected.replaceAll(RegExp(r'[ \t]+'), ' ');
+
+    // Correct AI-related headings
+    corrected = corrected.replaceAll(
+      RegExp(r'\bAl(?=\s+(CHATBOT|AGENT|PROMPT|MODEL|ENGINE|TOOL|GENERATIVE)\b)', caseSensitive: false),
+      'AI',
+    );
+
+    // Correct isolated AI text
+    if (RegExp(r'^AL$', caseSensitive: false).hasMatch(corrected)) {
+      corrected = 'AI';
+    }
+
+    // Common OCR typos
+    corrected = corrected.replaceAll(
+      RegExp(r'\bAPls\b', caseSensitive: false),
+      'APIs',
+    );
+
+    corrected = corrected.replaceAll(
+      RegExp(r'\bE\.g,', caseSensitive: false),
+      'E.g.',
+    );
+
+    return corrected;
+  }
 }
-}
 
-class _TextLine {
+class RecognizedLineData {
   final String text;
   final double left;
   final double top;
   final double right;
   final double bottom;
 
-  const _TextLine({
+  const RecognizedLineData({
     required this.text,
     required this.left,
     required this.top,
@@ -270,6 +180,37 @@ class _TextLine {
   });
 
   double get width => right - left;
+  double get height => bottom - top;
+}
+
+class _VisualRow {
+  double left;
+  double top;
+  double right;
+  double bottom;
+  final List<RecognizedLineData> lines;
+
+  _VisualRow(RecognizedLineData firstLine)
+      : left = firstLine.left,
+        top = firstLine.top,
+        right = firstLine.right,
+        bottom = firstLine.bottom,
+        lines = [firstLine];
 
   double get height => bottom - top;
+
+  double verticalOverlap(RecognizedLineData line) {
+    final overlapTop = max(top, line.top);
+    final overlapBottom = min(bottom, line.bottom);
+    if (overlapBottom <= overlapTop) return 0.0;
+    return overlapBottom - overlapTop;
+  }
+
+  void addLine(RecognizedLineData line) {
+    lines.add(line);
+    left = min(left, line.left);
+    top = min(top, line.top);
+    right = max(right, line.right);
+    bottom = max(bottom, line.bottom);
+  }
 }
