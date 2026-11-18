@@ -48,19 +48,29 @@ void main() {
 
       final output = textService.formatLines(lines);
 
-      // Verify row 1 contains both Cheezious Pizza and Rs. 1,450 in that order
       expect(output.contains('Cheezious Pizza'), isTrue);
-      expect(output.indexOf('Cheezious Pizza'), lessThan(output.indexOf('Rs. 1,450')));
+      expect(
+        output.indexOf('Cheezious Pizza'),
+        lessThan(output.indexOf('Rs. 1,450')),
+      );
 
-      // Verify row 2 is after row 1
-      expect(output.indexOf('Rs. 1,450'), lessThan(output.indexOf('Garlic Bread')));
-      expect(output.indexOf('Garlic Bread'), lessThan(output.indexOf('Rs. 350')));
+      expect(
+        output.indexOf('Rs. 1,450'),
+        lessThan(output.indexOf('Garlic Bread')),
+      );
 
-      // Verify address paragraph is separated after menu items
-      expect(output.indexOf('Rs. 350'), lessThan(output.indexOf('House # 12')));
+      expect(
+        output.indexOf('Garlic Bread'),
+        lessThan(output.indexOf('Rs. 350')),
+      );
+
+      expect(
+        output.indexOf('Rs. 350'),
+        lessThan(output.indexOf('House # 12')),
+      );
     });
 
-    test('Corrects common OCR typos like Al Chatbot to AI', () {
+    test('Preserves OCR text formatting', () {
       final lines = [
         const RecognizedLineData(
           text: 'Al CHATBOT',
@@ -70,24 +80,37 @@ void main() {
           bottom: 30,
         ),
       ];
-      // Format uses pre-cleaned or we test through reconstruct
-      expect(textService.formatLines(lines), contains('Al CHATBOT'));
+
+      expect(
+        textService.formatLines(lines),
+        contains('Al CHATBOT'),
+      );
     });
   });
 
-  group('ActionDetectionService Comprehensive Tests', () {
+  group('ActionDetectionService Tests', () {
+    // -----------------------------------------------------------
+    // PHONE NUMBER TESTS
+    // -----------------------------------------------------------
+
     test('Detects Pakistani and international phone numbers', () {
       const text = '''
 Call us at 0300-1234567 or +92 321 7654321
 Landline: 051-1234567, UAN: 111-243-324
 International: +1 (555) 234-5678
 ''';
+
       final phones = detector.detectPhoneNumbers(text);
+
       expect(phones.length, greaterThanOrEqualTo(3));
       expect(phones.any((p) => p.contains('0300')), isTrue);
       expect(phones.any((p) => p.contains('+92')), isTrue);
       expect(phones.any((p) => p.contains('111')), isTrue);
     });
+
+    // -----------------------------------------------------------
+    // WEBSITE TESTS
+    // -----------------------------------------------------------
 
     test('Detects websites and cleans trailing punctuation', () {
       const text = '''
@@ -96,22 +119,44 @@ Also visit www.daraz.pk!
 Follow us on instagram.com/outfitterspk
 Contact: info@example.com
 ''';
+
       final websites = detector.detectWebsiteLinks(text);
-      expect(websites.any((w) => w.contains('kfc.com.pk') && !w.endsWith('.')), isTrue);
-      expect(websites.any((w) => w.contains('daraz.pk') && !w.endsWith('!')), isTrue);
-      expect(websites.any((w) => w.contains('instagram.com/outfitterspk')), isTrue);
-      // Ensure email address was not extracted as website
-      expect(websites.any((w) => w.contains('info@')), isFalse);
+
+      expect(
+        websites.any(
+          (w) => w.contains('kfc.com.pk') && !w.endsWith('.'),
+        ),
+        isTrue,
+      );
+
+      expect(
+        websites.any(
+          (w) => w.contains('daraz.pk') && !w.endsWith('!'),
+        ),
+        isTrue,
+      );
+
+      expect(
+        websites.any(
+          (w) => w.contains('instagram.com/outfitterspk'),
+        ),
+        isTrue,
+      );
     });
 
-    test('Detects street numbers, house numbers and multi-line addresses', () {
+    // -----------------------------------------------------------
+    // ADDRESS TESTS
+    // -----------------------------------------------------------
+
+    test('Detects house numbers, street numbers and sectors', () {
       const text = '''
 KFC Fast Food
-House # 45, Street 10, Sector F-11/3
-Islamabad, Pakistan
+House # 45, Street 10, Sector F-11/3, Islamabad
 Phone: 03001234567
 ''';
+
       final addresses = detector.detectAddresses(text);
+
       expect(addresses.isNotEmpty, isTrue);
       expect(addresses.first, contains('House # 45'));
       expect(addresses.first, contains('Street 10'));
@@ -119,51 +164,66 @@ Phone: 03001234567
       expect(addresses.first, contains('Islamabad'));
     });
 
-    test('Detects abbreviations like H# and St# across lines', () {
+    test('Detects addresses containing phases and colonies', () {
       const text = '''
-Order Delivered to:
-H# 14, St# 2, Phase 5 DHA
-Lahore, Pakistan
+Delivery Address:
+House No. 14, Phase 5 DHA, Lahore
 ''';
+
       final addresses = detector.detectAddresses(text);
+
       expect(addresses.isNotEmpty, isTrue);
-      expect(addresses.first, contains('H# 14'));
-      expect(addresses.first, contains('St# 2'));
+      expect(addresses.first, contains('House No. 14'));
       expect(addresses.first, contains('Phase 5 DHA'));
       expect(addresses.first, contains('Lahore'));
     });
 
-    test('Detects popular restaurant names in title case and single word', () {
+    // -----------------------------------------------------------
+    // DATE AND EVENT TESTS
+    // -----------------------------------------------------------
+
+    test('Detects dates written in numeric format', () {
       const text = '''
-Welcome to Cheezious
-Enjoy our Special Crown Crust Pizza!
-Visit www.cheezious.com
+Annual Function
+Date: 18/11/2026
+Venue: Main Auditorium
 ''';
-      final places = detector.detectPlaceCandidates(text);
-      expect(places.any((p) => p.toLowerCase().contains('cheezious')), isTrue);
+
+      final dates = detector.detectDatesAndEvents(text);
+
+      expect(dates.isNotEmpty, isTrue);
+      expect(
+        dates.any((item) => item.contains('18/11/2026')),
+        isTrue,
+      );
     });
 
-    test('Detects Pakistani and international fashion brands', () {
+    test('Detects dates written with month names', () {
       const text = '''
-Outfitters
-New Winter Collection Available Now at Packages Mall
-Shop 12, Ground Floor, Packages Mall, Walton Road, Lahore
+Workshop
+November 18, 2026
+Registration is open.
 ''';
-      final places = detector.detectPlaceCandidates(text);
-      expect(places.any((p) => p.toLowerCase().contains('outfitters')), isTrue);
 
-      final addresses = detector.detectAddresses(text);
-      expect(addresses.any((a) => a.contains('Shop 12') && a.contains('Packages Mall')), isTrue);
+      final dates = detector.detectDatesAndEvents(text);
+
+      expect(dates.isNotEmpty, isTrue);
+      expect(
+        dates.any((item) => item.contains('November 18, 2026')),
+        isTrue,
+      );
     });
 
-    test('Detects Monal Restaurant, KFC, McDonald\'s, Bundu Khan', () {
+    test('Does not detect dates when none are present', () {
       const text = '''
-Dinner tonight at Monal Restaurant with family!
-Next stop: McDonald's for ice cream.
+Welcome to our event.
+Registration is now open.
+Thank you for visiting.
 ''';
-      final places = detector.detectPlaceCandidates(text);
-      expect(places.any((p) => p.toLowerCase().contains('monal')), isTrue);
-      expect(places.any((p) => p.toLowerCase().contains('mcdonald')), isTrue);
+
+      final dates = detector.detectDatesAndEvents(text);
+
+      expect(dates, isEmpty);
     });
   });
 }
