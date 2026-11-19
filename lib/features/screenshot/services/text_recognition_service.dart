@@ -1,24 +1,59 @@
 import 'dart:math';
 
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
+import 'package:tesseract_ocr/tesseract_ocr.dart';
+import 'package:tesseract_ocr/ocr_engine_config.dart';
+import 'package:flutter/foundation.dart';
 
 class TextRecognitionService {
-  Future<String> extractText(String imagePath) async {
-    final recognizer = TextRecognizer(
-      script: TextRecognitionScript.latin,
+ Future<String> extractText(String imagePath) async {
+  String englishText = '';
+  String urduText = '';
+
+  // STEP 1: English recognition using existing ML Kit.
+  final recognizer = TextRecognizer(
+    script: TextRecognitionScript.latin,
+  );
+
+  try {
+    final image = InputImage.fromFilePath(imagePath);
+    final result = await recognizer.processImage(image);
+
+    if (result.blocks.isNotEmpty) {
+      englishText = reconstructText(result);
+    }
+  } finally {
+    await recognizer.close();
+  }
+
+  // STEP 2: Urdu recognition using Tesseract only.
+  try {
+    final config = OCRConfig(
+      language: 'urd',
+      engine: OCREngine.tesseract,
     );
 
-    try {
-      final image = InputImage.fromFilePath(imagePath);
-      final result = await recognizer.processImage(image);
+    urduText = await TesseractOcr.extractText(
+      imagePath,
+      config: config,
+    );
 
-      if (result.blocks.isEmpty) return '';
-
-      return reconstructText(result);
-    } finally {
-      await recognizer.close();
-    }
+  } catch (e) {
+    debugPrint('Urdu OCR Error: $e');
   }
+
+  // STEP 3: Print both results separately.
+  debugPrint('========== ENGLISH OCR ==========');
+  debugPrint(englishText);
+
+  debugPrint('========== URDU OCR ==========');
+  debugPrint(urduText);
+
+  return [
+    englishText.trim(),
+    urduText.trim(),
+  ].where((text) => text.isNotEmpty).join('\n');
+}
 
   /// Reconstructs text from ML Kit RecognizedText while preserving natural reading order,
   /// tabular alignment, and paragraph structure without scrambling words or columns.

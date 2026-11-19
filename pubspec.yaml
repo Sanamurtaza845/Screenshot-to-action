@@ -41,6 +41,7 @@ dependencies:
   http: ^1.6.0
   add_2_calendar: ^3.1.1
   shared_preferences: ^2.5.3
+  tesseract_ocr: ^0.6.0
 
 dev_dependencies:
   flutter_test:
@@ -58,6 +59,9 @@ dev_dependencies:
 
 # The following section is specific to Flutter packages.
 flutter:
+  assets:
+    - assets/tessdata_config.json
+    - assets/tessdata/
 
   # The following line ensures that the Material Icons font is
   # included with your application, so that you can use the icons in
