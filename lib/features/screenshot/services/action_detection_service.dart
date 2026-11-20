@@ -6,22 +6,64 @@ class ActionDetectionService {
     // Normalize Eastern Arabic/Urdu digits (۰۱۲۳۴۵۶۷۸۹) to standard digits (0123456789)
     final normalizedText = normalizeUrduDigits(text);
 
-    final phoneRegex = RegExp(
-      r'(?:(?:\+|00)\d{1,3}[\s-]?)?'
-      r'(?:\(?0?\d{2,4}\)?[\s-]?)'
-      r'\d{3,4}[\s-]?\d{3,4}',
+    // 1. Pakistani Mobile numbers (11 digits local e.g. 0300-1234567, or with +92 / 0092)
+    final pakMobileRegex = RegExp(
+      r'(?:(?:\+|00)92[\s-]?)?0?3\d{2}[\s-]?\d{7}\b',
+    );
+
+    // 2. Pakistani Landline / PTCL numbers with area codes (021, 042, 051, 041, 061, 052, 040, 055, etc.)
+    final pakLandlineRegex = RegExp(
+      r'(?:(?:\+|00)92[\s-]?)?0?(?:21|42|51|41|61|52|40|55|91|81|582|581)[\s-]?\d{7,8}\b',
+    );
+
+    // 3. Pakistani UAN & Toll-Free (e.g. 111-243-324, 0800-12345)
+    final pakUanTollFreeRegex = RegExp(
+      r'\b(?:111[\s-]?\d{3}[\s-]?\d{3}|0800[\s-]?\d{5})\b',
+    );
+
+    // 4. International numbers with explicit country code (+ or 00)
+    final intlExplicitRegex = RegExp(
+      r'(?:\+|00)[1-9]\d{0,2}[\s-]?(?:\(?\d{1,4}\)?[\s-]?)?\d{3,4}[\s-]?\d{3,4}\b',
+    );
+
+    // 5. Contextual numbers preceded by phone / contact keywords
+    final contextualRegex = RegExp(
+      r'(?:(?:phone|tel|cell|mobile|mob|contact|call|whatsapp|ph|رابطہ|فون|موبائل|ٹیلیفون)[\s:#.-]{1,3})'
+      r'(\+?[\d\s-]{7,15})\b',
+      caseSensitive: false,
     );
 
     final results = <String>[];
 
-    for (final match in phoneRegex.allMatches(normalizedText)) {
-      final number = match.group(0)!.trim();
-      final digits = number.replaceAll(RegExp(r'\D'), '');
+    void addValidNumber(String raw) {
+      final cleaned = raw.trim();
+      final digits = cleaned.replaceAll(RegExp(r'\D'), '');
 
-      if (digits.length >= 9 &&
-          digits.length <= 15 &&
-          !results.contains(number)) {
-        results.add(number);
+      // Reject numbers that are too short, too long, or repetitive dummy sequences (e.g. 000000000)
+      if (digits.length < 9 || digits.length > 15) return;
+      if (RegExp(r'^(\d)\1+$').hasMatch(digits)) return;
+
+      // Reject common date formats like 20261120 or 20240101
+      if (digits.length == 8 && (digits.startsWith('20') || digits.startsWith('19'))) return;
+
+      if (!results.contains(cleaned)) {
+        results.add(cleaned);
+      }
+    }
+
+    // Match structured phone patterns
+    for (final pattern in [pakMobileRegex, pakLandlineRegex, pakUanTollFreeRegex, intlExplicitRegex]) {
+      for (final match in pattern.allMatches(normalizedText)) {
+        final matchStr = match.group(0)!;
+        addValidNumber(matchStr);
+      }
+    }
+
+    // Match contextual phone numbers
+    for (final match in contextualRegex.allMatches(normalizedText)) {
+      final numberPart = match.group(1);
+      if (numberPart != null) {
+        addValidNumber(numberPart);
       }
     }
 

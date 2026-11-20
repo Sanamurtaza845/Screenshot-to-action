@@ -176,8 +176,15 @@ class TextRecognitionService {
             config: config,
           );
 
-          urduText = _cleanUrduOcrText(rawUrdu);
-          urduSuccess = true;
+          final cleanedUrdu = _cleanUrduOcrText(rawUrdu);
+          if (_hasMeaningfulUrdu(cleanedUrdu)) {
+            urduText = cleanedUrdu;
+            urduSuccess = true;
+          } else {
+            // Discard noise and hallucinated characters when there is no genuine Urdu
+            urduText = '';
+            urduSuccess = false;
+          }
         } catch (e) {
           urduError = 'Urdu recognition failed: $e';
           urduSuccess = false;
@@ -249,6 +256,21 @@ class TextRecognitionService {
     cleaned = cleaned.replaceAll(RegExp(r'[\u200B-\u200D\uFEFF]'), '');
     cleaned = cleaned.replaceAll(RegExp(r'\n{3,}'), '\n\n');
     return cleaned.trim();
+  }
+
+  /// Verifies if text actually contains meaningful Urdu words,
+  /// filtering out stray Tesseract OCR noise or hallucinated single characters.
+  bool _hasMeaningfulUrdu(String text) {
+    if (text.trim().isEmpty) return false;
+    final urduRegex =
+        RegExp(r'[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]');
+    final matches = urduRegex.allMatches(text);
+    // At least 3 Urdu characters required
+    if (matches.length < 3) return false;
+
+    // Must contain at least one valid Urdu word (2 or more Urdu letters together)
+    final urduWordRegex = RegExp(r'[\u0600-\u06FF]{2,}');
+    return urduWordRegex.hasMatch(text);
   }
 
   String reconstructText(RecognizedText recognizedText) {

@@ -124,7 +124,11 @@ Strict Extraction Instructions:
 4. Zero Translation: Do NOT translate Urdu to English or English to Urdu. Keep the original text in its original script.
 5. Layout & Order: Preserve paragraph breaks, lines, bullet points, headers, and visual layout without scrambling words.
 6. Numbers & Codes: Transcribe numbers, phone numbers, addresses, and codes exactly as shown (whether Eastern Arabic/Urdu numerals '۰۱۲۳۴۵۶۷۸۹' or Western '0123456789').
-7. Output Format: Return the pure, complete extracted text directly without conversational commentary, preambles, or markdown code fences like ```text or ```.
+7. Negative Constraints (Strict Zero Hallucination):
+   - If the image contains ONLY English and NO Urdu, output ONLY English. NEVER output or hallucinate any Urdu characters, Urdu words, or Urdu translations.
+   - If the image contains NO phone numbers or NO numbers, do NOT invent or hallucinate any numbers.
+   - Transcribe ONLY what is visually and physically present in the screenshot. Never assume or add synthetic text.
+8. Output Format: Return the pure, complete extracted text directly without conversational commentary, preambles, or markdown code fences like ```text or ```.
 ''';
 
     final modelsToTry = [
@@ -194,9 +198,9 @@ Strict Extraction Instructions:
         }
       ],
       'generationConfig': {
-        'temperature': 0.1,
+        'temperature': 0.0,
         'topK': 1,
-        'topP': 0.95,
+        'topP': 0.1,
       }
     });
 
@@ -266,19 +270,25 @@ Strict Extraction Instructions:
         urduLines.add(line);
       } else if (hasEnglish && !hasUrdu) {
         englishLines.add(line);
-      } else {
-        // Mixed line: add to both or keep in combined
+      } else if (hasUrdu && hasEnglish) {
         urduLines.add(line);
+        englishLines.add(line);
+      } else {
+        // Line has neither (e.g., pure numbers, dates, punctuation, symbols)
+        // Add only to English lines, NEVER to Urdu lines unless Urdu characters exist
         englishLines.add(line);
       }
     }
 
-    final hasUrdu = urduRegex.hasMatch(text);
+    // A document genuinely has Urdu only if there are meaningful Urdu words
+    final hasUrduChar = urduRegex.hasMatch(text);
+    final hasUrdu = hasUrduChar &&
+        urduLines.any((l) => RegExp(r'[\u0600-\u06FF]{2,}').hasMatch(l));
     final hasEnglish = englishRegex.hasMatch(text);
 
     return _LanguageSeparationResult(
       englishText: englishLines.join('\n').trim(),
-      urduText: urduLines.join('\n').trim(),
+      urduText: hasUrdu ? urduLines.join('\n').trim() : '',
       hasUrdu: hasUrdu,
       hasEnglish: hasEnglish,
     );

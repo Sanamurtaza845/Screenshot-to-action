@@ -344,5 +344,27 @@ Thank you for visiting.
       expect(dates.isNotEmpty, isTrue);
       expect(dates.any((d) => d.contains('15 نومبر 2026')), isTrue);
     });
+
+    test('Does NOT detect false positive phone numbers from arbitrary digit sequences', () {
+      const nonPhoneText = '''
+Order # 9876543210
+Tracking Code: 123456789012
+Total Amount: Rs. 45,000
+Barcode: 890123456789
+Date: 20261120
+Dummy: 0000000000
+''';
+      final phones = detector.detectPhoneNumbers(nonPhoneText);
+      expect(phones, isEmpty, reason: 'Arbitrary digits, order IDs and barcodes must not be recognized as phone numbers');
+    });
+
+    test('Clean text with no numbers returns empty phone list', () {
+      const pureText = '''
+Welcome to Antigravity Software Solutions
+We build modern mobile applications for Android and iOS.
+''';
+      final phones = detector.detectPhoneNumbers(pureText);
+      expect(phones, isEmpty);
+    });
   });
 }

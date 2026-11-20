@@ -993,9 +993,12 @@ DateTime _parseDetectedDate(String text) {
   // --------------------------------------------------
 
   Widget _buildExtractedText(BuildContext context) {
-    final hasBoth = recognitionResult != null &&
-        recognitionResult!.englishText.isNotEmpty &&
-        recognitionResult!.urduText.isNotEmpty;
+    final hasUrduText = recognitionResult != null &&
+        recognitionResult!.urduText.trim().isNotEmpty &&
+        RegExp(r'[\u0600-\u06FF]').hasMatch(recognitionResult!.urduText);
+    final hasEnglishText = recognitionResult != null &&
+        recognitionResult!.englishText.trim().isNotEmpty;
+    final hasBoth = hasEnglishText && hasUrduText;
     final isUrduOnly = _isUrdu(extractedText);
 
     return Container(
