@@ -323,7 +323,86 @@ class TextRecognitionService {
     String cleaned = text.trim();
     cleaned = cleaned.replaceAll(RegExp(r'[\u200B-\u200D\uFEFF]'), '');
     cleaned = cleaned.replaceAll(RegExp(r'\n{3,}'), '\n\n');
+    cleaned = cleaned.replaceAll('ك', 'ک').replaceAll('ي', 'ی');
+
+    // Separate boundary when English words touch Urdu words directly (e.g. "dedicationاور" -> "dedication اور")
+    cleaned = cleaned.replaceAllMapped(
+      RegExp(r'([a-zA-Z]+)([\u0600-\u06FF]+)'),
+      (m) => '${m.group(1)} ${m.group(2)}',
+    );
+    cleaned = cleaned.replaceAllMapped(
+      RegExp(r'([\u0600-\u06FF]+)([a-zA-Z]+)'),
+      (m) => '${m.group(1)} ${m.group(2)}',
+    );
+
+    // Filter out isolated 1-3 letter Latin artifacts produced by Tesseract reading Urdu Nastaliq strokes
+    cleaned = _cleanTesseractBilingualArtifacts(cleaned);
+
     return cleaned.trim();
+  }
+
+  /// Removes stray isolated 1-3 letter Latin noise tokens (e.g. "GS dob", "yl SL", "ig", "GI", "ob")
+  /// that are artifacts of Tesseract's English model misinterpreting Urdu Nastaliq ligatures,
+  /// while strictly preserving authentic English sentences and words.
+  String _cleanTesseractBilingualArtifacts(String text) {
+    const validShortWords = {
+      'a', 'i', 'an', 'as', 'at', 'be', 'by', 'do', 'go', 'he', 'if', 'in',
+      'is', 'it', 'me', 'my', 'no', 'of', 'on', 'or', 'so', 'to', 'up', 'us',
+      'we', 'all', 'and', 'any', 'are', 'bad', 'but', 'can', 'day', 'did',
+      'for', 'get', 'had', 'has', 'her', 'him', 'his', 'how', 'its', 'let',
+      'may', 'new', 'not', 'now', 'off', 'old', 'one', 'our', 'out', 'say',
+      'see', 'she', 'the', 'too', 'two', 'use', 'way', 'who', 'why', 'yes',
+      'you',
+    };
+
+    final urduRegex =
+        RegExp(r'[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]');
+
+    final lines = text.split('\n');
+    final cleanedLines = <String>[];
+
+    for (final line in lines) {
+      final trimmed = line.trim();
+      if (trimmed.isEmpty) {
+        cleanedLines.add('');
+        continue;
+      }
+
+      // If the line has no Urdu at all, keep it as is
+      if (!urduRegex.hasMatch(trimmed)) {
+        cleanedLines.add(line);
+        continue;
+      }
+
+      final tokens = trimmed.split(RegExp(r'\s+'));
+      final cleanedTokens = <String>[];
+
+      for (int i = 0; i < tokens.length; i++) {
+        final token = tokens[i];
+        final cleanToken =
+            token.replaceAll(RegExp(r'[^a-zA-Z]'), '').toLowerCase();
+
+        // Check if it's an isolated 1-3 letter Latin token
+        if (cleanToken.isNotEmpty &&
+            cleanToken.length <= 3 &&
+            !validShortWords.contains(cleanToken)) {
+          final prevHasUrdu = i > 0 && urduRegex.hasMatch(tokens[i - 1]);
+          final nextHasUrdu =
+              (i + 1 < tokens.length) && urduRegex.hasMatch(tokens[i + 1]);
+
+          // If adjacent to Urdu on either side, it is an OCR noise artifact
+          if (prevHasUrdu || nextHasUrdu || tokens.length <= 4) {
+            continue;
+          }
+        }
+
+        cleanedTokens.add(token);
+      }
+
+      cleanedLines.add(cleanedTokens.join(' '));
+    }
+
+    return cleanedLines.join('\n');
   }
 
   /// Verifies if text actually contains meaningful Urdu words,

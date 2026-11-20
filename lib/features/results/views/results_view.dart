@@ -993,79 +993,79 @@ DateTime _parseDetectedDate(String text) {
   // --------------------------------------------------
 
   Widget _buildExtractedText(BuildContext context) {
-    final hasUrduText = recognitionResult != null &&
-        recognitionResult!.urduText.trim().isNotEmpty &&
-        RegExp(r'[\u0600-\u06FF]').hasMatch(recognitionResult!.urduText);
-    final hasEnglishText = recognitionResult != null &&
-        recognitionResult!.englishText.trim().isNotEmpty;
-    final hasBoth = hasEnglishText && hasUrduText;
-    final isUrduOnly = _isUrdu(extractedText);
+    final isPureUrdu =
+        _isUrdu(extractedText) && !RegExp(r'[a-zA-Z]').hasMatch(extractedText);
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: _background,
-        borderRadius: BorderRadius.circular(13),
+        borderRadius: BorderRadius.circular(14),
         border: Border.all(color: const Color(0xFFEDF0F5)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (hasBoth) ...[
-            _buildLanguageSubBlock(
-              context: context,
-              label: 'Complete Text (مکمل متن)',
-              badgeColor: const Color(0xFF6254E8),
-              content: extractedText,
-              isUrdu: false,
-            ),
-            const SizedBox(height: 14),
-            const Divider(height: 1),
-            const SizedBox(height: 14),
-            _buildLanguageSubBlock(
-              context: context,
-              label: 'English Segments',
-              badgeColor: const Color(0xFF3978D4),
-              content: recognitionResult!.englishText,
-              isUrdu: false,
-            ),
-            const SizedBox(height: 14),
-            const Divider(height: 1),
-            const SizedBox(height: 14),
-            _buildLanguageSubBlock(
-              context: context,
-              label: 'Urdu Segments (اردو)',
-              badgeColor: const Color(0xFF168B67),
-              content: recognitionResult!.urduText,
-              isUrdu: true,
-            ),
-          ] else ...[
-            SelectableText(
-              extractedText.isEmpty
-                  ? 'No text could be extracted from this screenshot.'
-                  : extractedText,
-              textDirection:
-                  isUrduOnly ? TextDirection.rtl : TextDirection.ltr,
-              textAlign: isUrduOnly ? TextAlign.right : TextAlign.left,
-              style: TextStyle(
-                color: _text,
-                fontSize: isUrduOnly ? 16 : 14,
-                height: isUrduOnly ? 1.8 : 1.7,
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF6254E8).withValues(alpha: 0.10),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.text_snippet_rounded,
+                      size: 14,
+                      color: Color(0xFF6254E8),
+                    ),
+                    SizedBox(width: 6),
+                    Text(
+                      'Extracted Text (As in Image)',
+                      style: TextStyle(
+                        color: Color(0xFF6254E8),
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-            const SizedBox(height: 12),
-            Align(
-              alignment: Alignment.centerRight,
-              child: TextButton.icon(
+              TextButton.icon(
                 onPressed: extractedText.isEmpty
                     ? null
                     : () => _copy(context, extractedText),
-                icon: const Icon(Icons.copy, size: 16),
-                label: const Text('Copy Text'),
+                icon: const Icon(Icons.copy, size: 15),
+                label: const Text('Copy', style: TextStyle(fontSize: 12)),
+                style: TextButton.styleFrom(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
               ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          SelectableText(
+            extractedText.isEmpty
+                ? 'No text could be extracted from this screenshot.'
+                : extractedText,
+            textDirection:
+                isPureUrdu ? TextDirection.rtl : TextDirection.ltr,
+            textAlign: isPureUrdu ? TextAlign.right : TextAlign.left,
+            style: TextStyle(
+              color: _text,
+              fontSize: 15,
+              height: 1.8,
             ),
-          ],
+          ),
         ],
       ),
     );
@@ -1074,62 +1074,6 @@ DateTime _parseDetectedDate(String text) {
   bool _isUrdu(String text) {
     return RegExp(r'[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]')
         .hasMatch(text);
-  }
-
-  Widget _buildLanguageSubBlock({
-    required BuildContext context,
-    required String label,
-    required Color badgeColor,
-    required String content,
-    bool isUrdu = false,
-  }) {
-    return Column(
-      crossAxisAlignment:
-          isUrdu ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-              decoration: BoxDecoration(
-                color: badgeColor.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text(
-                label,
-                style: TextStyle(
-                  color: badgeColor,
-                  fontSize: 11,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-            TextButton.icon(
-              onPressed: () => _copy(context, content),
-              icon: const Icon(Icons.copy, size: 14),
-              label: const Text('Copy', style: TextStyle(fontSize: 12)),
-              style: TextButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                minimumSize: Size.zero,
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        SelectableText(
-          content,
-          textDirection: isUrdu ? TextDirection.rtl : TextDirection.ltr,
-          textAlign: isUrdu ? TextAlign.right : TextAlign.left,
-          style: TextStyle(
-            color: _text,
-            fontSize: isUrdu ? 16 : 14,
-            height: isUrdu ? 1.8 : 1.7,
-          ),
-        ),
-      ],
-    );
   }
 
   // --------------------------------------------------
