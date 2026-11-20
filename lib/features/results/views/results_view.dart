@@ -1015,7 +1015,17 @@ DateTime _parseDetectedDate(String text) {
           if (hasBoth) ...[
             _buildLanguageSubBlock(
               context: context,
-              label: 'English Text',
+              label: 'Complete Text (مکمل متن)',
+              badgeColor: const Color(0xFF6254E8),
+              content: extractedText,
+              isUrdu: false,
+            ),
+            const SizedBox(height: 14),
+            const Divider(height: 1),
+            const SizedBox(height: 14),
+            _buildLanguageSubBlock(
+              context: context,
+              label: 'English Segments',
               badgeColor: const Color(0xFF3978D4),
               content: recognitionResult!.englishText,
               isUrdu: false,
@@ -1025,7 +1035,7 @@ DateTime _parseDetectedDate(String text) {
             const SizedBox(height: 14),
             _buildLanguageSubBlock(
               context: context,
-              label: 'Urdu Text (اردو)',
+              label: 'Urdu Segments (اردو)',
               badgeColor: const Color(0xFF168B67),
               content: recognitionResult!.urduText,
               isUrdu: true,

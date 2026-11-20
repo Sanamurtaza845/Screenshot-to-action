@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
+import '../../../core/config/api_config.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../screenshot/controllers/screenshot_controller.dart';
 
@@ -44,6 +45,25 @@ class HomeView extends StatelessWidget {
             ),
           ],
         ),
+        actions: [
+          IconButton(
+            icon: Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: AppTheme.primaryColor.withValues(alpha: 0.10),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(
+                Icons.vpn_key_rounded,
+                color: AppTheme.primaryColor,
+                size: 20,
+              ),
+            ),
+            tooltip: 'Gemini AI Key',
+            onPressed: () => _showApiKeyDialog(context),
+          ),
+          const SizedBox(width: 8),
+        ],
       ),
       body: SafeArea(
         child: SingleChildScrollView(
@@ -447,6 +467,84 @@ class HomeView extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Future<void> _showApiKeyDialog(BuildContext context) async {
+    final currentKey = await ApiConfig.getApiKey();
+    final textController = TextEditingController(text: currentKey);
+
+    if (!context.mounted) return;
+
+    await showDialog(
+      context: context,
+      builder: (dialogCtx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Row(
+          children: [
+            Icon(Icons.auto_awesome, color: AppTheme.primaryColor),
+            SizedBox(width: 10),
+            Text('Gemini Vision AI',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Enter your Google AI Studio API key (starts with AIzaSy) for 100% precision multimodal OCR:',
+              style: TextStyle(fontSize: 13, height: 1.4),
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: textController,
+              decoration: InputDecoration(
+                hintText: 'AIzaSy...',
+                border:
+                    OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                prefixIcon: const Icon(Icons.key),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Get a free key at: aistudio.google.com',
+              style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogCtx),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final newKey = textController.text.trim();
+              await ApiConfig.saveApiKey(newKey);
+              if (dialogCtx.mounted) Navigator.pop(dialogCtx);
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      newKey.isNotEmpty
+                          ? 'Gemini API Key updated successfully!'
+                          : 'API Key cleared. Using On-Device engine.',
+                    ),
+                  ),
+                );
+              }
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.primaryColor,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10)),
+            ),
+            child: const Text('Save Key'),
+          ),
+        ],
       ),
     );
   }

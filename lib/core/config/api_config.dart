@@ -70,6 +70,11 @@ class ApiConfig {
     await prefs.setString(_prefKeyGeminiKey, key.trim());
   }
 
+  /// Verifies whether key matches the official Google AI Studio format (AIzaSy...)
+  static bool isAiStudioKey(String key) {
+    return key.trim().startsWith('AIzaSy') && key.trim().length >= 35;
+  }
+
   /// Checks if a non-empty key is configured
   static bool isValidKey(String key) {
     return key.trim().isNotEmpty &&

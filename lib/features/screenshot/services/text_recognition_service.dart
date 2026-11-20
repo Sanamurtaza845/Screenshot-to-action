@@ -156,7 +156,7 @@ class TextRecognitionService {
         await recognizer.close();
       }
 
-      // 3. URDU OCR VIA TESSERACT
+      // 3. BILINGUAL URDU & ENGLISH OCR VIA TESSERACT (urd+eng)
       final isMobilePlatform =
           !kIsWeb && (Platform.isAndroid || Platform.isIOS);
 
@@ -166,19 +166,20 @@ class TextRecognitionService {
         urduSuccess = false;
       } else {
         try {
+          // Load BOTH urd and eng models simultaneously so Tesseract never confuses English words as Urdu numbers
           final config = OCRConfig(
-            language: 'urd',
+            language: 'urd+eng',
             engine: OCREngine.tesseract,
           );
 
-          final rawUrdu = await TesseractOcr.extractText(
+          final rawBilingual = await TesseractOcr.extractText(
             targetImagePath,
             config: config,
           );
 
-          final cleanedUrdu = _cleanUrduOcrText(rawUrdu);
-          if (_hasMeaningfulUrdu(cleanedUrdu)) {
-            urduText = cleanedUrdu;
+          final cleanedBilingual = _cleanUrduOcrText(rawBilingual);
+          if (_hasMeaningfulUrdu(cleanedBilingual)) {
+            urduText = cleanedBilingual;
             urduSuccess = true;
           } else {
             // Discard noise and hallucinated characters when there is no genuine Urdu
@@ -191,17 +192,20 @@ class TextRecognitionService {
         }
       }
 
-      // 4. COMBINE
+      // Clean ML Kit Latin noise (ML Kit tries to turn Urdu Nastaliq strokes into gibberish Latin characters)
+      final cleanedEnglish = _filterLatinNoiseFromUrdu(englishText);
+
+      // 4. COMBINE INTELLIGENTLY
       final combined = _combineExtractedTexts(
-        englishText: englishText.trim(),
+        englishText: cleanedEnglish,
         urduText: urduText.trim(),
       );
 
       return RecognitionResult(
         combinedText: combined,
-        englishText: englishText.trim(),
+        englishText: cleanedEnglish,
         urduText: urduText.trim(),
-        englishSuccess: englishSuccess,
+        englishSuccess: englishSuccess && cleanedEnglish.isNotEmpty,
         urduSuccess: urduSuccess,
         urduError: urduError,
         englishError: englishError,
@@ -221,11 +225,32 @@ class TextRecognitionService {
     required String englishText,
     required String urduText,
   }) {
-    if (englishText.isEmpty && urduText.isEmpty) return '';
-    if (englishText.isEmpty) return urduText;
-    if (urduText.isEmpty) return englishText;
-
     final cleanedEnglish = _filterLatinNoiseFromUrdu(englishText);
+
+    if (cleanedEnglish.isEmpty && urduText.isEmpty) return '';
+    if (cleanedEnglish.isEmpty) return urduText;
+    if (urduText.isEmpty) return cleanedEnglish;
+
+    // Check if urduText (from bilingual Tesseract urd+eng) already includes the English text
+    final urduLower = urduText.toLowerCase();
+    final englishWords = cleanedEnglish
+        .split(RegExp(r'\s+'))
+        .where((w) => w.length >= 4)
+        .toList();
+
+    int matchedWords = 0;
+    for (final word in englishWords) {
+      if (urduLower.contains(word.toLowerCase())) {
+        matchedWords++;
+      }
+    }
+
+    // If majority of English words are already in the bilingual text,
+    // the bilingual text already accurately preserves the natural mixed paragraph.
+    if (englishWords.isNotEmpty &&
+        matchedWords >= (englishWords.length * 0.4).round()) {
+      return urduText;
+    }
 
     return [
       cleanedEnglish,
@@ -241,7 +266,12 @@ class TextRecognitionService {
       final trimmed = line.trim();
       if (trimmed.isEmpty) continue;
 
-      if (RegExp(r'^[\W_\|\\/\[\]\<\>\-\+\=~`]{1,3}$').hasMatch(trimmed)) {
+      if (RegExp(r'^[\W_\|\\/\[\]\<\>\-\+\=~`]{1,4}$').hasMatch(trimmed)) {
+        continue;
+      }
+
+      // Filter out ML Kit Latin gibberish produced from reading Urdu Nastaliq strokes
+      if (_isMlKitUrduHallucination(trimmed)) {
         continue;
       }
 
@@ -249,6 +279,44 @@ class TextRecognitionService {
     }
 
     return validLines.join('\n').trim();
+  }
+
+  bool _isMlKitUrduHallucination(String line) {
+    // A. Foreign/accented characters uncommon in English but characteristic of ML Kit reading Urdu
+    final accentedMatches =
+        RegExp(r'[õüöèòüïëãñîôûàáìíùúýÿ]').allMatches(line).length;
+    if (accentedMatches >= 1) return true;
+
+    // B. Check word characteristics
+    final words = line.split(RegExp(r'\s+'));
+    if (words.length >= 3) {
+      int vowellessCount = 0;
+      int singleLetterCount = 0;
+
+      for (final w in words) {
+        final lettersOnly = w.replaceAll(RegExp(r'[^a-zA-Z]'), '');
+        if (lettersOnly.isEmpty) continue;
+
+        if (lettersOnly.length == 1 &&
+            lettersOnly != 'a' &&
+            lettersOnly != 'A' &&
+            lettersOnly != 'I') {
+          singleLetterCount++;
+        }
+
+        // Vowelless strings of 3+ letters (e.g. "uswj", "jwl", "bg4", "SIBIgS")
+        if (lettersOnly.length >= 3 &&
+            !RegExp(r'[aeiouyAEIOUY]').hasMatch(lettersOnly)) {
+          vowellessCount++;
+        }
+      }
+
+      if (vowellessCount >= 1 && singleLetterCount >= 2) return true;
+      if (singleLetterCount >= 3) return true;
+      if (vowellessCount >= 2) return true;
+    }
+
+    return false;
   }
 
   String _cleanUrduOcrText(String text) {
