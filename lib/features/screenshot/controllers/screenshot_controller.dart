@@ -196,27 +196,49 @@ class ScreenshotController extends GetxController {
     try {
       isProcessing.value = true;
 
-      final extractedText = await _textService.extractText(
+      final result = await _textService.extractTextDetailed(
         image.path,
       );
 
-      if (extractedText.trim().isEmpty) {
+      if (!result.hasAnyText) {
+        String message = 'We could not detect any text in this image.';
+        if (result.hasUrduFailure) {
+          message += '\nNote: ${result.urduError}';
+        }
         Get.snackbar(
           'No Text Found',
-          'We could not detect any text in this image.',
+          message,
+          snackPosition: SnackPosition.BOTTOM,
+          duration: const Duration(seconds: 4),
         );
         return;
       }
 
+      // If Urdu failed but English extracted text, alert the user explicitly
+      if (result.hasUrduFailure) {
+        Get.snackbar(
+          'Urdu OCR Notice',
+          result.urduError!,
+          backgroundColor: const Color(0xFFE65100),
+          colorText: Colors.white,
+          duration: const Duration(seconds: 5),
+          snackPosition: SnackPosition.BOTTOM,
+          margin: const EdgeInsets.all(14),
+          icon: const Icon(Icons.info_outline, color: Colors.white),
+        );
+      }
+
       Get.to(
         () => ResultsView(
-          extractedText: extractedText,
+          extractedText: result.combinedText,
+          recognitionResult: result,
         ),
       );
     } catch (e) {
       Get.snackbar(
         'Recognition Failed',
-        'Unable to read text from this screenshot.',
+        'Unable to read text from this screenshot: $e',
+        snackPosition: SnackPosition.BOTTOM,
       );
     } finally {
       isProcessing.value = false;

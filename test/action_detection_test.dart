@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:screenshot_to_action/features/screenshot/services/action_detection_service.dart';
+import 'package:screenshot_to_action/features/screenshot/services/image_preprocessing_service.dart';
 import 'package:screenshot_to_action/features/screenshot/services/text_recognition_service.dart';
 
 void main() {
@@ -224,6 +225,51 @@ Thank you for visiting.
       final dates = detector.detectDatesAndEvents(text);
 
       expect(dates, isEmpty);
+    });
+  });
+
+  group('RecognitionResult and Image Preprocessing Tests', () {
+    test('RecognitionResult correctly flags Urdu failure with diagnostic message', () {
+      const result = RecognitionResult(
+        combinedText: 'Welcome to our store',
+        englishText: 'Welcome to our store',
+        urduText: '',
+        englishSuccess: true,
+        urduSuccess: false,
+        urduError: 'Urdu offline OCR is supported on Android and iOS devices.',
+      );
+
+      expect(result.hasAnyText, isTrue);
+      expect(result.hasUrduFailure, isTrue);
+      expect(result.urduError, contains('Android and iOS'));
+      expect(result.hasEnglishFailure, isFalse);
+    });
+
+    test('PreprocessingMetadata generates accurate summary', () {
+      const meta = PreprocessingMetadata(
+        isDarkModeInverted: true,
+        wasUpscaled: true,
+        wasDownscaled: false,
+        wasContrastEnhanced: true,
+        originalWidth: 600,
+        originalHeight: 800,
+        processedWidth: 1200,
+        processedHeight: 1600,
+        averageLuminance: 45.0,
+      );
+
+      expect(meta.summary.contains('Dark Mode Inverted'), isTrue);
+      expect(meta.summary.contains('Resolution Upscaled'), isTrue);
+      expect(meta.summary.contains('Contrast Enhanced'), isTrue);
+      expect(meta.isDarkModeInverted, isTrue);
+    });
+
+    test('ImagePreprocessingService throws FileNotFoundException for missing files', () async {
+      final service = ImagePreprocessingService();
+      expect(
+        () => service.preprocess('non_existent_file_path.png'),
+        throwsA(isA<FileNotFoundException>()),
+      );
     });
   });
 }

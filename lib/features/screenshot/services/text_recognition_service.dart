@@ -1,59 +1,230 @@
+import 'dart:io';
 import 'dart:math';
 
-import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
-import 'package:tesseract_ocr/tesseract_ocr.dart';
-import 'package:tesseract_ocr/ocr_engine_config.dart';
 import 'package:flutter/foundation.dart';
+import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
+import 'package:tesseract_ocr/ocr_engine_config.dart';
+import 'package:tesseract_ocr/tesseract_ocr.dart';
+
+import 'image_preprocessing_service.dart';
+
+/// Detailed result of the recognition process containing text, status,
+/// language-specific breakdown, and error diagnostics.
+class RecognitionResult {
+  final String combinedText;
+  final String englishText;
+  final String urduText;
+  final bool englishSuccess;
+  final bool urduSuccess;
+  final String? urduError;
+  final String? englishError;
+  final PreprocessingMetadata? preprocessingMetadata;
+
+  const RecognitionResult({
+    required this.combinedText,
+    required this.englishText,
+    required this.urduText,
+    required this.englishSuccess,
+    required this.urduSuccess,
+    this.urduError,
+    this.englishError,
+    this.preprocessingMetadata,
+  });
+
+  bool get hasAnyText => combinedText.trim().isNotEmpty;
+  bool get hasUrduFailure => !urduSuccess && urduError != null;
+  bool get hasEnglishFailure => !englishSuccess && englishError != null;
+}
 
 class TextRecognitionService {
- Future<String> extractText(String imagePath) async {
-  String englishText = '';
-  String urduText = '';
+  final ImagePreprocessingService _preprocessingService =
+      ImagePreprocessingService();
 
-  // STEP 1: English recognition using existing ML Kit.
-  final recognizer = TextRecognizer(
-    script: TextRecognitionScript.latin,
-  );
+  /// Backwards-compatible extractText method returning combined text string.
+  Future<String> extractText(String imagePath) async {
+    final result = await extractTextDetailed(imagePath);
+    return result.combinedText;
+  }
 
-  try {
-    final image = InputImage.fromFilePath(imagePath);
-    final result = await recognizer.processImage(image);
+  /// Full featured recognition pipeline:
+  /// 1. Applies Image Pre-processing (scaling, dark-mode inversion, grayscale, contrast)
+  /// 2. Performs English OCR via Google ML Kit
+  /// 3. Performs Urdu OCR via Tesseract with diagnostic error handling & platform checks
+  /// 4. Intelligent post-processing and text merging
+  Future<RecognitionResult> extractTextDetailed(String imagePath) async {
+    String englishText = '';
+    String urduText = '';
+    bool englishSuccess = false;
+    bool urduSuccess = false;
+    String? englishError;
+    String? urduError;
 
-    if (result.blocks.isNotEmpty) {
-      englishText = reconstructText(result);
+    // STEP 0: IMAGE PRE-PROCESSING
+    PreprocessedImageResult? preprocessed;
+    String targetImagePath = imagePath;
+
+    try {
+      preprocessed = await _preprocessingService.preprocess(imagePath);
+      targetImagePath = preprocessed.file.path;
+      debugPrint(
+        'Image Preprocessing Complete: ${preprocessed.metadata.summary} '
+        '(Avg Lum: ${preprocessed.metadata.averageLuminance.toStringAsFixed(1)})',
+      );
+    } catch (e) {
+      debugPrint('Image Preprocessing Warning: $e. Falling back to original image.');
+      targetImagePath = imagePath;
     }
-  } finally {
-    await recognizer.close();
+
+    try {
+      // STEP 1: ENGLISH OCR VIA GOOGLE ML KIT
+      final recognizer = TextRecognizer(
+        script: TextRecognitionScript.latin,
+      );
+
+      try {
+        final image = InputImage.fromFilePath(targetImagePath);
+        final result = await recognizer.processImage(image);
+
+        if (result.blocks.isNotEmpty) {
+          englishText = reconstructText(result);
+        }
+        englishSuccess = true;
+      } catch (e, stack) {
+        englishError = 'English OCR Error: ${e.toString()}';
+        debugPrint('$englishError\n$stack');
+        englishSuccess = false;
+      } finally {
+        await recognizer.close();
+      }
+
+      // STEP 2: URDU OCR VIA TESSERACT WITH DIAGNOSTIC ERROR HANDLING
+      // Note: Tesseract mobile plugin natively runs on Android and iOS.
+      final isMobilePlatform = !kIsWeb && (Platform.isAndroid || Platform.isIOS);
+
+      if (!isMobilePlatform) {
+        urduError =
+            'Urdu offline OCR (Tesseract) is supported on Android and iOS devices. '
+            'Current platform (${Platform.operatingSystem}) operates in English ML Kit mode.';
+        debugPrint('Urdu OCR Status: $urduError');
+        urduSuccess = false;
+      } else {
+        try {
+          final config = OCRConfig(
+            language: 'urd',
+            engine: OCREngine.tesseract,
+          );
+
+          final rawUrdu = await TesseractOcr.extractText(
+            targetImagePath,
+            config: config,
+          );
+
+          urduText = _cleanUrduOcrText(rawUrdu);
+          urduSuccess = true;
+        } catch (e, stack) {
+          final errorStr = e.toString();
+          debugPrint('Urdu OCR Exception: $errorStr\n$stack');
+
+          if (errorStr.contains('MissingPluginException')) {
+            urduError =
+                'Tesseract OCR native plugin is not registered on this platform build.';
+          } else if (errorStr.contains('urd.traineddata') ||
+              errorStr.contains('tessdata')) {
+            urduError =
+                'Urdu language traineddata (assets/tessdata/urd.traineddata) could not be loaded by the OCR engine.';
+          } else {
+            urduError =
+                'Urdu recognition failed: ${errorStr.length > 120 ? errorStr.substring(0, 120) : errorStr}';
+          }
+          urduSuccess = false;
+        }
+      }
+
+      // STEP 3: LOG RESULTS SEPARATELY FOR DEBUGGING
+      debugPrint('========== ENGLISH OCR ==========');
+      debugPrint(englishText.isNotEmpty ? englishText : '(No English detected)');
+
+      debugPrint('========== URDU OCR ==========');
+      if (urduSuccess) {
+        debugPrint(urduText.isNotEmpty ? urduText : '(No Urdu detected)');
+      } else {
+        debugPrint('URDU OCR FAILED: $urduError');
+      }
+
+      // STEP 4: INTELLIGENT COMBINATION
+      final combined = _combineExtractedTexts(
+        englishText: englishText.trim(),
+        urduText: urduText.trim(),
+      );
+
+      return RecognitionResult(
+        combinedText: combined,
+        englishText: englishText.trim(),
+        urduText: urduText.trim(),
+        englishSuccess: englishSuccess,
+        urduSuccess: urduSuccess,
+        urduError: urduError,
+        englishError: englishError,
+        preprocessingMetadata: preprocessed?.metadata,
+      );
+    } finally {
+      // Always cleanup temporary preprocessed file
+      if (preprocessed != null) {
+        await preprocessed.cleanup();
+      }
+    }
   }
 
-  // STEP 2: Urdu recognition using Tesseract only.
-  try {
-    final config = OCRConfig(
-      language: 'urd',
-      engine: OCREngine.tesseract,
-    );
+  /// Intelligently combines English and Urdu extracted text.
+  /// Removes duplicate lines and filters out single-character Latin noise generated
+  /// by ML Kit when reading Urdu characters.
+  String _combineExtractedTexts({
+    required String englishText,
+    required String urduText,
+  }) {
+    if (englishText.isEmpty && urduText.isEmpty) return '';
+    if (englishText.isEmpty) return urduText;
+    if (urduText.isEmpty) return englishText;
 
-    urduText = await TesseractOcr.extractText(
-      imagePath,
-      config: config,
-    );
+    // Both languages present: clean noise and separate clearly
+    final cleanedEnglish = _filterLatinNoiseFromUrdu(englishText);
 
-  } catch (e) {
-    debugPrint('Urdu OCR Error: $e');
+    return [
+      cleanedEnglish,
+      urduText,
+    ].where((t) => t.isNotEmpty).join('\n\n');
   }
 
-  // STEP 3: Print both results separately.
-  debugPrint('========== ENGLISH OCR ==========');
-  debugPrint(englishText);
+  /// Filters out isolated punctuation and junk Latin artifacts that ML Kit
+  /// generates when attempting to parse Arabic/Urdu scripts with a Latin model.
+  String _filterLatinNoiseFromUrdu(String text) {
+    final lines = text.split('\n');
+    final validLines = <String>[];
 
-  debugPrint('========== URDU OCR ==========');
-  debugPrint(urduText);
+    for (final line in lines) {
+      final trimmed = line.trim();
+      if (trimmed.isEmpty) continue;
 
-  return [
-    englishText.trim(),
-    urduText.trim(),
-  ].where((text) => text.isNotEmpty).join('\n');
-}
+      // Filter lines that are purely junk symbols or single stray characters
+      if (RegExp(r'^[\W_\|\\/\[\]\<\>\-\+\=~`]{1,3}$').hasMatch(trimmed)) {
+        continue;
+      }
+
+      validLines.add(line);
+    }
+
+    return validLines.join('\n').trim();
+  }
+
+  /// Cleans Urdu text extracted from Tesseract.
+  String _cleanUrduOcrText(String text) {
+    String cleaned = text.trim();
+    // Normalize zero-width non-joiners and abnormal control codes
+    cleaned = cleaned.replaceAll(RegExp(r'[\u200B-\u200D\uFEFF]'), '');
+    // Replace multiple empty lines with a double newline
+    cleaned = cleaned.replaceAll(RegExp(r'\n{3,}'), '\n\n');
+    return cleaned.trim();
+  }
 
   /// Reconstructs text from ML Kit RecognizedText while preserving natural reading order,
   /// tabular alignment, and paragraph structure without scrambling words or columns.
@@ -175,7 +346,10 @@ class TextRecognitionService {
 
     // Correct AI-related headings
     corrected = corrected.replaceAll(
-      RegExp(r'\bAl(?=\s+(CHATBOT|AGENT|PROMPT|MODEL|ENGINE|TOOL|GENERATIVE)\b)', caseSensitive: false),
+      RegExp(
+        r'\bAl(?=\s+(CHATBOT|AGENT|PROMPT|MODEL|ENGINE|TOOL|GENERATIVE)\b)',
+        caseSensitive: false,
+      ),
       'AI',
     );
 

@@ -4,14 +4,18 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../screenshot/services/action_detection_service.dart';
+import '../../screenshot/services/image_preprocessing_service.dart';
+import '../../screenshot/services/text_recognition_service.dart';
 import 'package:add_2_calendar/add_2_calendar.dart';
 
 class ResultsView extends StatelessWidget {
   final String extractedText;
+  final RecognitionResult? recognitionResult;
 
   ResultsView({
     super.key,
     required this.extractedText,
+    this.recognitionResult,
   });
 
   final ActionDetectionService _detector = ActionDetectionService();
@@ -55,6 +59,16 @@ class ResultsView extends StatelessWidget {
                 padding: const EdgeInsets.fromLTRB(18, 18, 18, 20),
                 children: [
                   _buildHeader(totalDetected),
+
+                  if (recognitionResult?.preprocessingMetadata != null) ...[
+                    const SizedBox(height: 14),
+                    _buildPreprocessingBadge(recognitionResult!.preprocessingMetadata!),
+                  ],
+
+                  if (recognitionResult?.hasUrduFailure == true) ...[
+                    const SizedBox(height: 14),
+                    _buildUrduNoticeCard(recognitionResult!.urduError!),
+                  ],
 
                   const SizedBox(height: 22),
 
@@ -842,11 +856,99 @@ DateTime _parseDetectedDate(String text) {
     );
   }
 
+  Widget _buildPreprocessingBadge(PreprocessingMetadata metadata) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFF6254E8).withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: const Color(0xFF6254E8).withValues(alpha: 0.20),
+        ),
+      ),
+      child: Row(
+        children: [
+          const Icon(
+            Icons.auto_fix_high_rounded,
+            color: Color(0xFF6254E8),
+            size: 18,
+          ),
+          const SizedBox(width: 9),
+          Expanded(
+            child: Text(
+              'Image Preprocessed: ${metadata.summary}',
+              style: const TextStyle(
+                color: Color(0xFF322E73),
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildUrduNoticeCard(String errorMessage) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF3E0),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: const Color(0xFFFFB74D),
+          width: 1.2,
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(
+            Icons.warning_amber_rounded,
+            color: Color(0xFFE65100),
+            size: 22,
+          ),
+          const SizedBox(width: 11),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Urdu OCR Notice',
+                  style: TextStyle(
+                    color: Color(0xFFB23B00),
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  errorMessage,
+                  style: TextStyle(
+                    color: Colors.brown.shade800,
+                    fontSize: 12,
+                    height: 1.45,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   // --------------------------------------------------
   // EXTRACTED TEXT
   // --------------------------------------------------
 
   Widget _buildExtractedText(BuildContext context) {
+    final hasBoth = recognitionResult != null &&
+        recognitionResult!.englishText.isNotEmpty &&
+        recognitionResult!.urduText.isNotEmpty;
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(14),
@@ -858,29 +960,99 @@ DateTime _parseDetectedDate(String text) {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SelectableText(
-            extractedText.isEmpty
-                ? 'No text could be extracted from this screenshot.'
-                : extractedText,
-            style: const TextStyle(
-              color: _text,
-              fontSize: 14,
-              height: 1.7,
+          if (hasBoth) ...[
+            _buildLanguageSubBlock(
+              context: context,
+              label: 'English Text',
+              badgeColor: const Color(0xFF3978D4),
+              content: recognitionResult!.englishText,
             ),
-          ),
-          const SizedBox(height: 12),
-          Align(
-            alignment: Alignment.centerRight,
-            child: TextButton.icon(
-              onPressed: extractedText.isEmpty
-                  ? null
-                  : () => _copy(context, extractedText),
-              icon: const Icon(Icons.copy, size: 16),
-              label: const Text('Copy Text'),
+            const SizedBox(height: 14),
+            const Divider(height: 1),
+            const SizedBox(height: 14),
+            _buildLanguageSubBlock(
+              context: context,
+              label: 'Urdu Text (اردو)',
+              badgeColor: const Color(0xFF168B67),
+              content: recognitionResult!.urduText,
             ),
-          ),
+          ] else ...[
+            SelectableText(
+              extractedText.isEmpty
+                  ? 'No text could be extracted from this screenshot.'
+                  : extractedText,
+              style: const TextStyle(
+                color: _text,
+                fontSize: 14,
+                height: 1.7,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                onPressed: extractedText.isEmpty
+                    ? null
+                    : () => _copy(context, extractedText),
+                icon: const Icon(Icons.copy, size: 16),
+                label: const Text('Copy Text'),
+              ),
+            ),
+          ],
         ],
       ),
+    );
+  }
+
+  Widget _buildLanguageSubBlock({
+    required BuildContext context,
+    required String label,
+    required Color badgeColor,
+    required String content,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+              decoration: BoxDecoration(
+                color: badgeColor.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                label,
+                style: TextStyle(
+                  color: badgeColor,
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+            TextButton.icon(
+              onPressed: () => _copy(context, content),
+              icon: const Icon(Icons.copy, size: 14),
+              label: const Text('Copy', style: TextStyle(fontSize: 12)),
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        SelectableText(
+          content,
+          style: const TextStyle(
+            color: _text,
+            fontSize: 14,
+            height: 1.7,
+          ),
+        ),
+      ],
     );
   }
 
