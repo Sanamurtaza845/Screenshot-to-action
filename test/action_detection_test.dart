@@ -1,5 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:screenshot_to_action/core/config/api_config.dart';
 import 'package:screenshot_to_action/features/screenshot/services/action_detection_service.dart';
+import 'package:screenshot_to_action/features/screenshot/services/gemini_vision_service.dart';
 import 'package:screenshot_to_action/features/screenshot/services/image_preprocessing_service.dart';
 import 'package:screenshot_to_action/features/screenshot/services/text_recognition_service.dart';
 
@@ -270,6 +272,77 @@ Thank you for visiting.
         () => service.preprocess('non_existent_file_path.png'),
         throwsA(isA<FileNotFoundException>()),
       );
+    });
+
+    test('ApiConfig validates keys accurately', () {
+      expect(ApiConfig.isValidKey(''), isFalse);
+      expect(ApiConfig.isValidKey('YOUR_GEMINI_API_KEY_HERE'), isFalse);
+      expect(ApiConfig.isValidKey('short'), isFalse);
+      expect(ApiConfig.isValidKey('AIzaSyD-validKeyForGeminiTest12345'), isTrue);
+    });
+
+    test('GeminiOcrResult constructs success and fallback failure properly', () {
+      final success = GeminiOcrResult.success(
+        text: 'Clean 100% extracted text',
+        englishText: 'Clean 100% extracted text',
+        urduText: '',
+        hasUrdu: false,
+        hasEnglish: true,
+        model: 'gemini-3.8-flash',
+      );
+      expect(success.isSuccess, isTrue);
+      expect(success.text, 'Clean 100% extracted text');
+      expect(success.hasEnglish, isTrue);
+      expect(success.hasUrdu, isFalse);
+      expect(success.fallbackToOffline, isFalse);
+
+      final failure = GeminiOcrResult.failure(
+        errorMessage: 'Network timeout',
+        fallbackToOffline: true,
+      );
+      expect(failure.isSuccess, isFalse);
+      expect(failure.fallbackToOffline, isTrue);
+    });
+  });
+
+  group('Urdu Action Detection Tests', () {
+    test('Normalizes Urdu numerals to Western digits accurately', () {
+      expect(detector.normalizeUrduDigits('۰۳۰۰۱۲۳۴۵۶۷'), '03001234567');
+      expect(detector.normalizeUrduDigits('۱۵ نومبر ۲۰۲۶'), '15 نومبر 2026');
+    });
+
+    test('Detects Urdu phone numbers written in Urdu numerals', () {
+      const text = 'رابطہ نمبر: ۰۳۰۰-۱۲۳۴۵۶۷ یا ۰۳۲۱ ۷۶۵۴۳۲۱';
+      final phones = detector.detectPhoneNumbers(text);
+
+      expect(phones.length, greaterThanOrEqualTo(2));
+      expect(phones.any((p) => p.contains('0300')), isTrue);
+      expect(phones.any((p) => p.contains('0321')), isTrue);
+    });
+
+    test('Detects Urdu addresses with Urdu keywords and cities', () {
+      const text = '''
+پتہ:
+مکان نمبر 45، گلی نمبر 10، فیز 5 ڈی ایچ اے، لاہور
+فون: 03001234567
+''';
+      final addresses = detector.detectAddresses(text);
+
+      expect(addresses.isNotEmpty, isTrue);
+      expect(addresses.first.contains('مکان نمبر 45'), isTrue);
+      expect(addresses.first.contains('لاہور'), isTrue);
+    });
+
+    test('Detects Urdu dates with Urdu month names', () {
+      const text = '''
+سالانہ تقریب
+تاریخ: 15 نومبر 2026
+مقام: جناح ہال
+''';
+      final dates = detector.detectDatesAndEvents(text);
+
+      expect(dates.isNotEmpty, isTrue);
+      expect(dates.any((d) => d.contains('15 نومبر 2026')), isTrue);
     });
   });
 }

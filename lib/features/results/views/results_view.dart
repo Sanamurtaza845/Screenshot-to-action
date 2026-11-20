@@ -60,6 +60,14 @@ class ResultsView extends StatelessWidget {
                 children: [
                   _buildHeader(totalDetected),
 
+                  if (recognitionResult?.engineNotice != null) ...[
+                    const SizedBox(height: 14),
+                    _buildEngineNoticeBadge(
+                      recognitionResult!.engineNotice!,
+                      isGemini: recognitionResult!.isGeminiVision,
+                    ),
+                  ],
+
                   if (recognitionResult?.preprocessingMetadata != null) ...[
                     const SizedBox(height: 14),
                     _buildPreprocessingBadge(recognitionResult!.preprocessingMetadata!),
@@ -419,20 +427,21 @@ DateTime selectedDate = _parseDetectedDate(detectedText);
 }
 DateTime _parseDetectedDate(String text) {
   final now = DateTime.now();
+  final normalized = _detector.normalizeUrduDigits(text);
 
   const months = {
-    'january': 1, 'jan': 1,
-    'february': 2, 'feb': 2,
-    'march': 3, 'mar': 3,
-    'april': 4, 'apr': 4,
-    'may': 5,
-    'june': 6, 'jun': 6,
-    'july': 7, 'jul': 7,
-    'august': 8, 'aug': 8,
-    'september': 9, 'sep': 9, 'sept': 9,
-    'october': 10, 'oct': 10,
-    'november': 11, 'nov': 11,
-    'december': 12, 'dec': 12,
+    'january': 1, 'jan': 1, 'جنوری': 1,
+    'february': 2, 'feb': 2, 'فروری': 2,
+    'march': 3, 'mar': 3, 'مارچ': 3,
+    'april': 4, 'apr': 4, 'اپریل': 4,
+    'may': 5, 'مئی': 5,
+    'june': 6, 'jun': 6, 'جون': 6,
+    'july': 7, 'jul': 7, 'جولائی': 7,
+    'august': 8, 'aug': 8, 'اگست': 8,
+    'september': 9, 'sep': 9, 'sept': 9, 'ستمبر': 9,
+    'october': 10, 'oct': 10, 'اکتوبر': 10,
+    'november': 11, 'nov': 11, 'نومبر': 11,
+    'december': 12, 'dec': 12, 'دسمبر': 12,
   };
 
   final monthPattern = months.keys.join('|');
@@ -461,14 +470,14 @@ DateTime _parseDetectedDate(String text) {
   int month = now.month;
   int day = now.day;
 
-  final isoMatch = iso.firstMatch(text);
+  final isoMatch = iso.firstMatch(normalized);
 
   if (isoMatch != null) {
     year = int.parse(isoMatch.group(1)!);
     month = int.parse(isoMatch.group(2)!);
     day = int.parse(isoMatch.group(3)!);
   } else {
-    final numericMatch = numeric.firstMatch(text);
+    final numericMatch = numeric.firstMatch(normalized);
 
     if (numericMatch != null) {
       day = int.parse(numericMatch.group(1)!);
@@ -479,12 +488,12 @@ DateTime _parseDetectedDate(String text) {
         year += 2000;
       }
     } else {
-      final match = dayFirst.firstMatch(text) ??
-          monthFirst.firstMatch(text);
+      final match = dayFirst.firstMatch(normalized) ??
+          monthFirst.firstMatch(normalized);
 
       if (match == null) return now;
 
-      final isDayFirst = dayFirst.firstMatch(text) != null;
+      final isDayFirst = dayFirst.firstMatch(normalized) != null;
 
       if (isDayFirst) {
         day = int.parse(match.group(1)!);
@@ -856,6 +865,45 @@ DateTime _parseDetectedDate(String text) {
     );
   }
 
+  Widget _buildEngineNoticeBadge(String notice, {required bool isGemini}) {
+    final color = isGemini ? const Color(0xFF6254E8) : const Color(0xFF455A64);
+    final bgColor = isGemini
+        ? const Color(0xFF6254E8).withValues(alpha: 0.08)
+        : const Color(0xFF455A64).withValues(alpha: 0.08);
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: color.withValues(alpha: 0.22),
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            isGemini ? Icons.auto_awesome : Icons.offline_bolt_outlined,
+            color: color,
+            size: 19,
+          ),
+          const SizedBox(width: 9),
+          Expanded(
+            child: Text(
+              notice,
+              style: TextStyle(
+                color: color,
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildPreprocessingBadge(PreprocessingMetadata metadata) {
     return Container(
       width: double.infinity,
@@ -948,6 +996,7 @@ DateTime _parseDetectedDate(String text) {
     final hasBoth = recognitionResult != null &&
         recognitionResult!.englishText.isNotEmpty &&
         recognitionResult!.urduText.isNotEmpty;
+    final isUrduOnly = _isUrdu(extractedText);
 
     return Container(
       width: double.infinity,
@@ -966,6 +1015,7 @@ DateTime _parseDetectedDate(String text) {
               label: 'English Text',
               badgeColor: const Color(0xFF3978D4),
               content: recognitionResult!.englishText,
+              isUrdu: false,
             ),
             const SizedBox(height: 14),
             const Divider(height: 1),
@@ -975,16 +1025,20 @@ DateTime _parseDetectedDate(String text) {
               label: 'Urdu Text (اردو)',
               badgeColor: const Color(0xFF168B67),
               content: recognitionResult!.urduText,
+              isUrdu: true,
             ),
           ] else ...[
             SelectableText(
               extractedText.isEmpty
                   ? 'No text could be extracted from this screenshot.'
                   : extractedText,
-              style: const TextStyle(
+              textDirection:
+                  isUrduOnly ? TextDirection.rtl : TextDirection.ltr,
+              textAlign: isUrduOnly ? TextAlign.right : TextAlign.left,
+              style: TextStyle(
                 color: _text,
-                fontSize: 14,
-                height: 1.7,
+                fontSize: isUrduOnly ? 16 : 14,
+                height: isUrduOnly ? 1.8 : 1.7,
               ),
             ),
             const SizedBox(height: 12),
@@ -1004,14 +1058,21 @@ DateTime _parseDetectedDate(String text) {
     );
   }
 
+  bool _isUrdu(String text) {
+    return RegExp(r'[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]')
+        .hasMatch(text);
+  }
+
   Widget _buildLanguageSubBlock({
     required BuildContext context,
     required String label,
     required Color badgeColor,
     required String content,
+    bool isUrdu = false,
   }) {
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment:
+          isUrdu ? CrossAxisAlignment.end : CrossAxisAlignment.start,
       children: [
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1046,10 +1107,12 @@ DateTime _parseDetectedDate(String text) {
         const SizedBox(height: 8),
         SelectableText(
           content,
-          style: const TextStyle(
+          textDirection: isUrdu ? TextDirection.rtl : TextDirection.ltr,
+          textAlign: isUrdu ? TextAlign.right : TextAlign.left,
+          style: TextStyle(
             color: _text,
-            fontSize: 14,
-            height: 1.7,
+            fontSize: isUrdu ? 16 : 14,
+            height: isUrdu ? 1.8 : 1.7,
           ),
         ),
       ],
