@@ -4,14 +4,18 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../screenshot/services/action_detection_service.dart';
+import '../../screenshot/services/image_preprocessing_service.dart';
+import '../../screenshot/services/text_recognition_service.dart';
 import 'package:add_2_calendar/add_2_calendar.dart';
 
 class ResultsView extends StatelessWidget {
   final String extractedText;
+  final RecognitionResult? recognitionResult;
 
   ResultsView({
     super.key,
     required this.extractedText,
+    this.recognitionResult,
   });
 
   final ActionDetectionService _detector = ActionDetectionService();
@@ -55,6 +59,19 @@ class ResultsView extends StatelessWidget {
                 padding: const EdgeInsets.fromLTRB(18, 18, 18, 20),
                 children: [
                   _buildHeader(totalDetected),
+
+                  if (recognitionResult?.engineNotice != null) ...[
+                    const SizedBox(height: 14),
+                    _buildEngineNoticeBadge(
+                      recognitionResult!.engineNotice!,
+                      isGemini: recognitionResult!.isGeminiVision,
+                    ),
+                  ],
+
+                  if (recognitionResult?.preprocessingMetadata != null) ...[
+                    const SizedBox(height: 14),
+                    _buildPreprocessingBadge(recognitionResult!.preprocessingMetadata!),
+                  ],
 
                   const SizedBox(height: 22),
 
@@ -405,20 +422,21 @@ DateTime selectedDate = _parseDetectedDate(detectedText);
 }
 DateTime _parseDetectedDate(String text) {
   final now = DateTime.now();
+  final normalized = _detector.normalizeUrduDigits(text);
 
   const months = {
-    'january': 1, 'jan': 1,
-    'february': 2, 'feb': 2,
-    'march': 3, 'mar': 3,
-    'april': 4, 'apr': 4,
-    'may': 5,
-    'june': 6, 'jun': 6,
-    'july': 7, 'jul': 7,
-    'august': 8, 'aug': 8,
-    'september': 9, 'sep': 9, 'sept': 9,
-    'october': 10, 'oct': 10,
-    'november': 11, 'nov': 11,
-    'december': 12, 'dec': 12,
+    'january': 1, 'jan': 1, 'جنوری': 1,
+    'february': 2, 'feb': 2, 'فروری': 2,
+    'march': 3, 'mar': 3, 'مارچ': 3,
+    'april': 4, 'apr': 4, 'اپریل': 4,
+    'may': 5, 'مئی': 5,
+    'june': 6, 'jun': 6, 'جون': 6,
+    'july': 7, 'jul': 7, 'جولائی': 7,
+    'august': 8, 'aug': 8, 'اگست': 8,
+    'september': 9, 'sep': 9, 'sept': 9, 'ستمبر': 9,
+    'october': 10, 'oct': 10, 'اکتوبر': 10,
+    'november': 11, 'nov': 11, 'نومبر': 11,
+    'december': 12, 'dec': 12, 'دسمبر': 12,
   };
 
   final monthPattern = months.keys.join('|');
@@ -447,14 +465,14 @@ DateTime _parseDetectedDate(String text) {
   int month = now.month;
   int day = now.day;
 
-  final isoMatch = iso.firstMatch(text);
+  final isoMatch = iso.firstMatch(normalized);
 
   if (isoMatch != null) {
     year = int.parse(isoMatch.group(1)!);
     month = int.parse(isoMatch.group(2)!);
     day = int.parse(isoMatch.group(3)!);
   } else {
-    final numericMatch = numeric.firstMatch(text);
+    final numericMatch = numeric.firstMatch(normalized);
 
     if (numericMatch != null) {
       day = int.parse(numericMatch.group(1)!);
@@ -465,12 +483,12 @@ DateTime _parseDetectedDate(String text) {
         year += 2000;
       }
     } else {
-      final match = dayFirst.firstMatch(text) ??
-          monthFirst.firstMatch(text);
+      final match = dayFirst.firstMatch(normalized) ??
+          monthFirst.firstMatch(normalized);
 
       if (match == null) return now;
 
-      final isDayFirst = dayFirst.firstMatch(text) != null;
+      final isDayFirst = dayFirst.firstMatch(normalized) != null;
 
       if (isDayFirst) {
         day = int.parse(match.group(1)!);
@@ -842,46 +860,165 @@ DateTime _parseDetectedDate(String text) {
     );
   }
 
-  // --------------------------------------------------
-  // EXTRACTED TEXT
-  // --------------------------------------------------
+  Widget _buildEngineNoticeBadge(String notice, {required bool isGemini}) {
+    final color = isGemini ? const Color(0xFF6254E8) : const Color(0xFF455A64);
+    final bgColor = isGemini
+        ? const Color(0xFF6254E8).withValues(alpha: 0.08)
+        : const Color(0xFF455A64).withValues(alpha: 0.08);
 
-  Widget _buildExtractedText(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
-        color: _background,
-        borderRadius: BorderRadius.circular(13),
-        border: Border.all(color: const Color(0xFFEDF0F5)),
+        color: bgColor,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: color.withValues(alpha: 0.22),
+        ),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
         children: [
-          SelectableText(
-            extractedText.isEmpty
-                ? 'No text could be extracted from this screenshot.'
-                : extractedText,
-            style: const TextStyle(
-              color: _text,
-              fontSize: 14,
-              height: 1.7,
-            ),
+          Icon(
+            isGemini ? Icons.auto_awesome : Icons.offline_bolt_outlined,
+            color: color,
+            size: 19,
           ),
-          const SizedBox(height: 12),
-          Align(
-            alignment: Alignment.centerRight,
-            child: TextButton.icon(
-              onPressed: extractedText.isEmpty
-                  ? null
-                  : () => _copy(context, extractedText),
-              icon: const Icon(Icons.copy, size: 16),
-              label: const Text('Copy Text'),
+          const SizedBox(width: 9),
+          Expanded(
+            child: Text(
+              notice,
+              style: TextStyle(
+                color: color,
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+              ),
             ),
           ),
         ],
       ),
     );
+  }
+
+  Widget _buildPreprocessingBadge(PreprocessingMetadata metadata) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFF6254E8).withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: const Color(0xFF6254E8).withValues(alpha: 0.20),
+        ),
+      ),
+      child: Row(
+        children: [
+          const Icon(
+            Icons.auto_fix_high_rounded,
+            color: Color(0xFF6254E8),
+            size: 18,
+          ),
+          const SizedBox(width: 9),
+          Expanded(
+            child: Text(
+              'Image Preprocessed: ${metadata.summary}',
+              style: const TextStyle(
+                color: Color(0xFF322E73),
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // --------------------------------------------------
+  // EXTRACTED TEXT
+  // --------------------------------------------------
+
+  Widget _buildExtractedText(BuildContext context) {
+    final isPureUrdu =
+        _isUrdu(extractedText) && !RegExp(r'[a-zA-Z]').hasMatch(extractedText);
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: _background,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFEDF0F5)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF6254E8).withValues(alpha: 0.10),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.text_snippet_rounded,
+                      size: 14,
+                      color: Color(0xFF6254E8),
+                    ),
+                    SizedBox(width: 6),
+                    Text(
+                      'Extracted Text (As in Image)',
+                      style: TextStyle(
+                        color: Color(0xFF6254E8),
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              TextButton.icon(
+                onPressed: extractedText.isEmpty
+                    ? null
+                    : () => _copy(context, extractedText),
+                icon: const Icon(Icons.copy, size: 15),
+                label: const Text('Copy', style: TextStyle(fontSize: 12)),
+                style: TextButton.styleFrom(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          SelectableText(
+            extractedText.isEmpty
+                ? 'No text could be extracted from this screenshot.'
+                : extractedText,
+            textDirection:
+                isPureUrdu ? TextDirection.rtl : TextDirection.ltr,
+            textAlign: isPureUrdu ? TextAlign.right : TextAlign.left,
+            style: TextStyle(
+              color: _text,
+              fontSize: 15,
+              height: 1.8,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  bool _isUrdu(String text) {
+    return RegExp(r'[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]')
+        .hasMatch(text);
   }
 
   // --------------------------------------------------

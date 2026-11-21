@@ -196,27 +196,31 @@ class ScreenshotController extends GetxController {
     try {
       isProcessing.value = true;
 
-      final extractedText = await _textService.extractText(
+      final result = await _textService.extractTextDetailed(
         image.path,
       );
 
-      if (extractedText.trim().isEmpty) {
+      if (!result.hasAnyText) {
         Get.snackbar(
           'No Text Found',
-          'We could not detect any text in this image.',
+          'We could not detect any readable English text in this image.',
+          snackPosition: SnackPosition.BOTTOM,
+          duration: const Duration(seconds: 4),
         );
         return;
       }
 
       Get.to(
         () => ResultsView(
-          extractedText: extractedText,
+          extractedText: result.combinedText,
+          recognitionResult: result,
         ),
       );
     } catch (e) {
       Get.snackbar(
         'Recognition Failed',
-        'Unable to read text from this screenshot.',
+        'Unable to read text from this screenshot: $e',
+        snackPosition: SnackPosition.BOTTOM,
       );
     } finally {
       isProcessing.value = false;

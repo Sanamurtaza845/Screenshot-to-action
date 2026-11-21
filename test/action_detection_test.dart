@@ -1,5 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:screenshot_to_action/core/config/api_config.dart';
 import 'package:screenshot_to_action/features/screenshot/services/action_detection_service.dart';
+import 'package:screenshot_to_action/features/screenshot/services/image_preprocessing_service.dart';
 import 'package:screenshot_to_action/features/screenshot/services/text_recognition_service.dart';
 
 void main() {
@@ -224,6 +226,135 @@ Thank you for visiting.
       final dates = detector.detectDatesAndEvents(text);
 
       expect(dates, isEmpty);
+    });
+  });
+
+  group('RecognitionResult and Image Preprocessing Tests', () {
+    test('RecognitionResult correctly flags Urdu failure with diagnostic message', () {
+      const result = RecognitionResult(
+        combinedText: 'Welcome to our store',
+        englishText: 'Welcome to our store',
+        urduText: '',
+        englishSuccess: true,
+        urduSuccess: false,
+        urduError: 'Urdu offline OCR is supported on Android and iOS devices.',
+      );
+
+      expect(result.hasAnyText, isTrue);
+      expect(result.hasUrduFailure, isTrue);
+      expect(result.urduError, contains('Android and iOS'));
+      expect(result.hasEnglishFailure, isFalse);
+    });
+
+    test('PreprocessingMetadata generates accurate summary', () {
+      const meta = PreprocessingMetadata(
+        isDarkModeInverted: true,
+        wasUpscaled: true,
+        wasDownscaled: false,
+        wasContrastEnhanced: true,
+        originalWidth: 600,
+        originalHeight: 800,
+        processedWidth: 1200,
+        processedHeight: 1600,
+        averageLuminance: 45.0,
+      );
+
+      expect(meta.summary.contains('Dark Mode Inverted'), isTrue);
+      expect(meta.summary.contains('Resolution Upscaled'), isTrue);
+      expect(meta.summary.contains('Contrast Enhanced'), isTrue);
+      expect(meta.isDarkModeInverted, isTrue);
+    });
+
+    test('ImagePreprocessingService throws FileNotFoundException for missing files', () async {
+      final service = ImagePreprocessingService();
+      expect(
+        () => service.preprocess('non_existent_file_path.png'),
+        throwsA(isA<FileNotFoundException>()),
+      );
+    });
+
+    test('ApiConfig validates keys accurately', () {
+      expect(ApiConfig.isValidKey(''), isFalse);
+      expect(ApiConfig.isValidKey('YOUR_GEMINI_API_KEY_HERE'), isFalse);
+      expect(ApiConfig.isValidKey('short'), isFalse);
+      expect(ApiConfig.isValidKey('AIzaSyD-validKeyForGeminiTest12345'), isTrue);
+    });
+
+    test('RecognitionResult constructs offline ML Kit result properly', () {
+      const result = RecognitionResult(
+        combinedText: 'Clean 100% extracted English text',
+        englishText: 'Clean 100% extracted English text',
+        englishSuccess: true,
+        engineType: RecognitionEngineType.offlineMLKit,
+        engineNotice: 'Extracted with On-Device AI Engine (100% Offline)',
+      );
+      expect(result.hasAnyText, isTrue);
+      expect(result.combinedText, 'Clean 100% extracted English text');
+      expect(result.englishSuccess, isTrue);
+      expect(result.isGeminiVision, isFalse);
+    });
+  });
+
+  group('Urdu Action Detection Tests', () {
+    test('Normalizes Urdu numerals to Western digits accurately', () {
+      expect(detector.normalizeUrduDigits('۰۳۰۰۱۲۳۴۵۶۷'), '03001234567');
+      expect(detector.normalizeUrduDigits('۱۵ نومبر ۲۰۲۶'), '15 نومبر 2026');
+    });
+
+    test('Detects Urdu phone numbers written in Urdu numerals', () {
+      const text = 'رابطہ نمبر: ۰۳۰۰-۱۲۳۴۵۶۷ یا ۰۳۲۱ ۷۶۵۴۳۲۱';
+      final phones = detector.detectPhoneNumbers(text);
+
+      expect(phones.length, greaterThanOrEqualTo(2));
+      expect(phones.any((p) => p.contains('0300')), isTrue);
+      expect(phones.any((p) => p.contains('0321')), isTrue);
+    });
+
+    test('Detects Urdu addresses with Urdu keywords and cities', () {
+      const text = '''
+پتہ:
+مکان نمبر 45، گلی نمبر 10، فیز 5 ڈی ایچ اے، لاہور
+فون: 03001234567
+''';
+      final addresses = detector.detectAddresses(text);
+
+      expect(addresses.isNotEmpty, isTrue);
+      expect(addresses.first.contains('مکان نمبر 45'), isTrue);
+      expect(addresses.first.contains('لاہور'), isTrue);
+    });
+
+    test('Detects Urdu dates with Urdu month names', () {
+      const text = '''
+سالانہ تقریب
+تاریخ: 15 نومبر 2026
+مقام: جناح ہال
+''';
+      final dates = detector.detectDatesAndEvents(text);
+
+      expect(dates.isNotEmpty, isTrue);
+      expect(dates.any((d) => d.contains('15 نومبر 2026')), isTrue);
+    });
+
+    test('Does NOT detect false positive phone numbers from arbitrary digit sequences', () {
+      const nonPhoneText = '''
+Order # 9876543210
+Tracking Code: 123456789012
+Total Amount: Rs. 45,000
+Barcode: 890123456789
+Date: 20261120
+Dummy: 0000000000
+''';
+      final phones = detector.detectPhoneNumbers(nonPhoneText);
+      expect(phones, isEmpty, reason: 'Arbitrary digits, order IDs and barcodes must not be recognized as phone numbers');
+    });
+
+    test('Clean text with no numbers returns empty phone list', () {
+      const pureText = '''
+Welcome to Antigravity Software Solutions
+We build modern mobile applications for Android and iOS.
+''';
+      final phones = detector.detectPhoneNumbers(pureText);
+      expect(phones, isEmpty);
     });
   });
 }

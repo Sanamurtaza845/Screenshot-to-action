@@ -1,62 +1,140 @@
 import 'dart:math';
 
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
-import 'package:tesseract_ocr/tesseract_ocr.dart';
-import 'package:tesseract_ocr/ocr_engine_config.dart';
-import 'package:flutter/foundation.dart';
 
-class TextRecognitionService {
- Future<String> extractText(String imagePath) async {
-  String englishText = '';
-  String urduText = '';
+import 'image_preprocessing_service.dart';
 
-  // STEP 1: English recognition using existing ML Kit.
-  final recognizer = TextRecognizer(
-    script: TextRecognitionScript.latin,
-  );
-
-  try {
-    final image = InputImage.fromFilePath(imagePath);
-    final result = await recognizer.processImage(image);
-
-    if (result.blocks.isNotEmpty) {
-      englishText = reconstructText(result);
-    }
-  } finally {
-    await recognizer.close();
-  }
-
-  // STEP 2: Urdu recognition using Tesseract only.
-  try {
-    final config = OCRConfig(
-      language: 'urd',
-      engine: OCREngine.tesseract,
-    );
-
-    urduText = await TesseractOcr.extractText(
-      imagePath,
-      config: config,
-    );
-
-  } catch (e) {
-    debugPrint('Urdu OCR Error: $e');
-  }
-
-  // STEP 3: Print both results separately.
-  debugPrint('========== ENGLISH OCR ==========');
-  debugPrint(englishText);
-
-  debugPrint('========== URDU OCR ==========');
-  debugPrint(urduText);
-
-  return [
-    englishText.trim(),
-    urduText.trim(),
-  ].where((text) => text.isNotEmpty).join('\n');
+enum RecognitionEngineType {
+  offlineMLKit, // 100% On-device offline Google ML Kit
 }
 
-  /// Reconstructs text from ML Kit RecognizedText while preserving natural reading order,
-  /// tabular alignment, and paragraph structure without scrambling words or columns.
+/// Detailed result of the recognition process containing text, status,
+/// diagnostics, and engine metadata.
+class RecognitionResult {
+  final String combinedText;
+  final String englishText;
+  final String urduText;
+  final bool englishSuccess;
+  final bool urduSuccess;
+  final String? urduError;
+  final String? englishError;
+  final PreprocessingMetadata? preprocessingMetadata;
+  final RecognitionEngineType engineType;
+  final String? engineNotice;
+
+  const RecognitionResult({
+    required this.combinedText,
+    required this.englishText,
+    this.urduText = '',
+    required this.englishSuccess,
+    this.urduSuccess = false,
+    this.urduError,
+    this.englishError,
+    this.preprocessingMetadata,
+    this.engineType = RecognitionEngineType.offlineMLKit,
+    this.engineNotice,
+  });
+
+  bool get hasAnyText => combinedText.trim().isNotEmpty;
+  bool get hasUrduFailure => false;
+  bool get hasEnglishFailure => !englishSuccess && englishError != null;
+  bool get isGeminiVision => false;
+}
+
+class TextRecognitionService {
+  final ImagePreprocessingService _preprocessingService =
+      ImagePreprocessingService();
+
+  /// Backwards-compatible extractText method returning combined text string.
+  Future<String> extractText(String imagePath) async {
+    final result = await extractTextDetailed(imagePath);
+    return result.combinedText;
+  }
+
+  /// High-accuracy 100% offline text extraction pipeline using:
+  /// 1. Dynamic Contrast & Sharpness Image Preprocessing
+  /// 2. Google ML Kit Latin Text Recognition Engine
+  /// 3. Visual Row & Column Layout Reconstruction
+  Future<RecognitionResult> extractTextDetailed(String imagePath) async {
+    PreprocessedImageResult? preprocessed;
+    String targetImagePath = imagePath;
+    String englishText = '';
+    bool englishSuccess = false;
+    String? englishError;
+
+    try {
+      // 1. IMAGE PREPROCESSING FOR MAXIMUM OCR ACCURACY
+      try {
+        preprocessed = await _preprocessingService.preprocess(imagePath);
+        targetImagePath = preprocessed.file.path;
+      } catch (e) {
+        targetImagePath = imagePath;
+      }
+
+      // 2. GOOGLE ML KIT TEXT RECOGNITION (100% OFFLINE)
+      final recognizer = TextRecognizer(
+        script: TextRecognitionScript.latin,
+      );
+
+      try {
+        final inputImage = InputImage.fromFilePath(targetImagePath);
+        final recognizedText = await recognizer.processImage(inputImage);
+
+        if (recognizedText.blocks.isNotEmpty) {
+          englishText = reconstructText(recognizedText);
+        }
+        englishSuccess = englishText.trim().isNotEmpty;
+      } catch (e) {
+        englishError = 'Text recognition error: $e';
+        englishSuccess = false;
+      } finally {
+        await recognizer.close();
+      }
+
+      // 3. CLEAN & NORMALIZE TEXT
+      final cleanedText = _cleanExtractedEnglishText(englishText);
+
+      return RecognitionResult(
+        combinedText: cleanedText,
+        englishText: cleanedText,
+        urduText: '',
+        englishSuccess: cleanedText.isNotEmpty,
+        urduSuccess: false,
+        englishError: englishError,
+        preprocessingMetadata: preprocessed?.metadata,
+        engineType: RecognitionEngineType.offlineMLKit,
+        engineNotice: 'Extracted with On-Device AI Engine (100% Offline)',
+      );
+    } finally {
+      if (preprocessed != null) {
+        await preprocessed.cleanup();
+      }
+    }
+  }
+
+  /// Filters out empty lines and pure symbol noise lines
+  String _cleanExtractedEnglishText(String text) {
+    if (text.trim().isEmpty) return '';
+
+    final lines = text.split('\n');
+    final validLines = <String>[];
+
+    for (final line in lines) {
+      final trimmed = line.trim();
+      if (trimmed.isEmpty) continue;
+
+      // Skip lines that are just symbols/brackets/delimiters
+      if (RegExp(r'^[\W_\|\\/\[\]\<\>\-\+\=~`]{1,4}$').hasMatch(trimmed)) {
+        continue;
+      }
+
+      validLines.add(line);
+    }
+
+    return validLines.join('\n').trim();
+  }
+
+  /// Reconstructs the exact visual reading layout from RecognizedText blocks
   String reconstructText(RecognizedText recognizedText) {
     final rawLines = <RecognizedLineData>[];
 
@@ -83,12 +161,10 @@ class TextRecognitionService {
     return formatLines(rawLines);
   }
 
-  /// Spatially groups lines into horizontal visual rows and orders rows top-to-bottom,
-  /// lines left-to-right within rows, preserving tabular gaps and paragraph breaks.
+  /// Formats lines into visual rows and preserves paragraphs and horizontal order
   String formatLines(List<RecognizedLineData> rawLines) {
     if (rawLines.isEmpty) return '';
 
-    // Sort all lines by top coordinate initially
     final lines = List<RecognizedLineData>.from(rawLines)
       ..sort((a, b) => a.top.compareTo(b.top));
 
@@ -114,30 +190,25 @@ class TextRecognitionService {
       }
     }
 
-    // Sort rows from top to bottom
     rows.sort((a, b) => a.top.compareTo(b.top));
 
     final buffer = StringBuffer();
     _VisualRow? previousRow;
 
     for (final row in rows) {
-      // Sort lines inside each row left to right
       row.lines.sort((a, b) => a.left.compareTo(b.left));
 
-      // Check vertical gap from previous row for paragraph break
       if (previousRow != null) {
         final verticalGap = row.top - previousRow.bottom;
         final avgHeight = (row.height + previousRow.height) / 2;
 
         if (verticalGap > avgHeight * 1.3) {
-          // Distinct paragraph / section separation
           buffer.write('\n\n');
         } else {
           buffer.write('\n');
         }
       }
 
-      // Format lines inside this row
       final rowBuffer = StringBuffer();
       for (int i = 0; i < row.lines.length; i++) {
         final currentLine = row.lines[i];
@@ -146,7 +217,6 @@ class TextRecognitionService {
           final previousLine = row.lines[i - 1];
           final horizontalGap = currentLine.left - previousLine.right;
 
-          // If there is a noticeable column gap (e.g., receipt or table), insert wider gap
           if (horizontalGap > row.height * 2.5) {
             rowBuffer.write('    ');
           } else {
@@ -166,25 +236,21 @@ class TextRecognitionService {
 
   String _correctOcrText(String text) {
     String corrected = text.trim();
-
-    // Remove zero-width spaces and abnormal control characters
     corrected = corrected.replaceAll(RegExp(r'[\u200B-\u200D\uFEFF]'), '');
-
-    // Normalize multiple whitespace to single space
     corrected = corrected.replaceAll(RegExp(r'[ \t]+'), ' ');
 
-    // Correct AI-related headings
     corrected = corrected.replaceAll(
-      RegExp(r'\bAl(?=\s+(CHATBOT|AGENT|PROMPT|MODEL|ENGINE|TOOL|GENERATIVE)\b)', caseSensitive: false),
+      RegExp(
+        r'\bAl(?=\s+(CHATBOT|AGENT|PROMPT|MODEL|ENGINE|TOOL|GENERATIVE)\b)',
+        caseSensitive: false,
+      ),
       'AI',
     );
 
-    // Correct isolated AI text
     if (RegExp(r'^AL$', caseSensitive: false).hasMatch(corrected)) {
       corrected = 'AI';
     }
 
-    // Common OCR typos
     corrected = corrected.replaceAll(
       RegExp(r'\bAPls\b', caseSensitive: false),
       'APIs',
