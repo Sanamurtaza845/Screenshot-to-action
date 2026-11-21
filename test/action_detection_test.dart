@@ -1,7 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:screenshot_to_action/core/config/api_config.dart';
 import 'package:screenshot_to_action/features/screenshot/services/action_detection_service.dart';
-import 'package:screenshot_to_action/features/screenshot/services/gemini_vision_service.dart';
 import 'package:screenshot_to_action/features/screenshot/services/image_preprocessing_service.dart';
 import 'package:screenshot_to_action/features/screenshot/services/text_recognition_service.dart';
 
@@ -281,27 +280,18 @@ Thank you for visiting.
       expect(ApiConfig.isValidKey('AIzaSyD-validKeyForGeminiTest12345'), isTrue);
     });
 
-    test('GeminiOcrResult constructs success and fallback failure properly', () {
-      final success = GeminiOcrResult.success(
-        text: 'Clean 100% extracted text',
-        englishText: 'Clean 100% extracted text',
-        urduText: '',
-        hasUrdu: false,
-        hasEnglish: true,
-        model: 'gemini-3.8-flash',
+    test('RecognitionResult constructs offline ML Kit result properly', () {
+      const result = RecognitionResult(
+        combinedText: 'Clean 100% extracted English text',
+        englishText: 'Clean 100% extracted English text',
+        englishSuccess: true,
+        engineType: RecognitionEngineType.offlineMLKit,
+        engineNotice: 'Extracted with On-Device AI Engine (100% Offline)',
       );
-      expect(success.isSuccess, isTrue);
-      expect(success.text, 'Clean 100% extracted text');
-      expect(success.hasEnglish, isTrue);
-      expect(success.hasUrdu, isFalse);
-      expect(success.fallbackToOffline, isFalse);
-
-      final failure = GeminiOcrResult.failure(
-        errorMessage: 'Network timeout',
-        fallbackToOffline: true,
-      );
-      expect(failure.isSuccess, isFalse);
-      expect(failure.fallbackToOffline, isTrue);
+      expect(result.hasAnyText, isTrue);
+      expect(result.combinedText, 'Clean 100% extracted English text');
+      expect(result.englishSuccess, isTrue);
+      expect(result.isGeminiVision, isFalse);
     });
   });
 

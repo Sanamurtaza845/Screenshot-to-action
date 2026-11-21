@@ -73,11 +73,6 @@ class ResultsView extends StatelessWidget {
                     _buildPreprocessingBadge(recognitionResult!.preprocessingMetadata!),
                   ],
 
-                  if (recognitionResult?.hasUrduFailure == true) ...[
-                    const SizedBox(height: 14),
-                    _buildUrduNoticeCard(recognitionResult!.urduError!),
-                  ],
-
                   const SizedBox(height: 22),
 
                   _buildSection(
@@ -931,56 +926,6 @@ DateTime _parseDetectedDate(String text) {
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
               ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildUrduNoticeCard(String errorMessage) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: const Color(0xFFFFF3E0),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: const Color(0xFFFFB74D),
-          width: 1.2,
-        ),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Icon(
-            Icons.warning_amber_rounded,
-            color: Color(0xFFE65100),
-            size: 22,
-          ),
-          const SizedBox(width: 11),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Urdu OCR Notice',
-                  style: TextStyle(
-                    color: Color(0xFFB23B00),
-                    fontSize: 13,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  errorMessage,
-                  style: TextStyle(
-                    color: Colors.brown.shade800,
-                    fontSize: 12,
-                    height: 1.45,
-                  ),
-                ),
-              ],
             ),
           ),
         ],

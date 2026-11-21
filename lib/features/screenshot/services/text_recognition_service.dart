@@ -1,21 +1,15 @@
-import 'dart:io';
 import 'dart:math';
 
-import 'package:flutter/foundation.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
-import 'package:tesseract_ocr/ocr_engine_config.dart';
-import 'package:tesseract_ocr/tesseract_ocr.dart';
 
-import 'gemini_vision_service.dart';
 import 'image_preprocessing_service.dart';
 
 enum RecognitionEngineType {
-  geminiVision, // Cloud AI Vision (100% precision mode)
-  offlineMLKit, // On-device offline fallback engine
+  offlineMLKit, // 100% On-device offline Google ML Kit
 }
 
 /// Detailed result of the recognition process containing text, status,
-/// language-specific breakdown, error diagnostics, and engine metadata.
+/// diagnostics, and engine metadata.
 class RecognitionResult {
   final String combinedText;
   final String englishText;
@@ -31,9 +25,9 @@ class RecognitionResult {
   const RecognitionResult({
     required this.combinedText,
     required this.englishText,
-    required this.urduText,
+    this.urduText = '',
     required this.englishSuccess,
-    required this.urduSuccess,
+    this.urduSuccess = false,
     this.urduError,
     this.englishError,
     this.preprocessingMetadata,
@@ -42,18 +36,14 @@ class RecognitionResult {
   });
 
   bool get hasAnyText => combinedText.trim().isNotEmpty;
-  bool get hasUrduFailure => !urduSuccess && urduError != null;
+  bool get hasUrduFailure => false;
   bool get hasEnglishFailure => !englishSuccess && englishError != null;
-  bool get isGeminiVision => engineType == RecognitionEngineType.geminiVision;
+  bool get isGeminiVision => false;
 }
 
 class TextRecognitionService {
-  final GeminiVisionService _geminiService = GeminiVisionService();
   final ImagePreprocessingService _preprocessingService =
       ImagePreprocessingService();
-
-  /// Checks if device currently has active internet connectivity
-  Future<bool> hasInternetConnection() => _geminiService.hasInternetConnection();
 
   /// Backwards-compatible extractText method returning combined text string.
   Future<String> extractText(String imagePath) async {
@@ -61,74 +51,19 @@ class TextRecognitionService {
     return result.combinedText;
   }
 
-  /// Full featured recognition pipeline:
-  /// 1. Attempts 100% precision extraction using Gemini Vision API.
-  /// 2. If internet is down or API unavailable, automatically falls back to
-  ///    the optimized offline on-device engine (Preprocessing + ML Kit + Tesseract)
-  ///    so the app remains 100% functional without hanging or crashing.
+  /// High-accuracy 100% offline text extraction pipeline using:
+  /// 1. Dynamic Contrast & Sharpness Image Preprocessing
+  /// 2. Google ML Kit Latin Text Recognition Engine
+  /// 3. Visual Row & Column Layout Reconstruction
   Future<RecognitionResult> extractTextDetailed(String imagePath) async {
-    // -------------------------------------------------------------
-    // ATTEMPT 1: GEMINI VISION API (100% PRECISION BILINGUAL MODE)
-    // -------------------------------------------------------------
-    try {
-      final geminiResult = await _geminiService.extractBilingualText(imagePath);
-
-      if (geminiResult.isSuccess && geminiResult.text.trim().isNotEmpty) {
-        debugPrint(
-          'Gemini Vision 100% Precision Bilingual Extraction Succeeded using ${geminiResult.modelUsed}',
-        );
-
-        final noticeParts = <String>[];
-        if (geminiResult.hasEnglish) noticeParts.add('English');
-        if (geminiResult.hasUrdu) noticeParts.add('Urdu Nastaliq');
-        final langNotice = noticeParts.isEmpty
-            ? 'Bilingual'
-            : noticeParts.join(' & ');
-
-        return RecognitionResult(
-          combinedText: geminiResult.text.trim(),
-          englishText: geminiResult.englishText,
-          urduText: geminiResult.urduText,
-          englishSuccess: geminiResult.hasEnglish || !geminiResult.hasUrdu,
-          urduSuccess: geminiResult.hasUrdu,
-          engineType: RecognitionEngineType.geminiVision,
-          engineNotice:
-              'Extracted with 100% precision via Gemini Vision ($langNotice)',
-        );
-      } else {
-        debugPrint(
-          'Gemini Vision Notice: ${geminiResult.errorMessage}. Falling back to offline engine.',
-        );
-      }
-    } catch (e) {
-      debugPrint('Gemini Vision exception: $e. Falling back to offline engine.');
-    }
-
-    // -------------------------------------------------------------
-    // ATTEMPT 2: OFFLINE FALLBACK PIPELINE (NO INTERNET BLOCK)
-    // -------------------------------------------------------------
-    return await _runOfflineFallback(
-      imagePath,
-      notice: 'Extracted using On-Device Engine (Offline Fallback)',
-    );
-  }
-
-  Future<RecognitionResult> _runOfflineFallback(
-    String imagePath, {
-    String? notice,
-  }) async {
-    String englishText = '';
-    String urduText = '';
-    bool englishSuccess = false;
-    bool urduSuccess = false;
-    String? englishError;
-    String? urduError;
-
     PreprocessedImageResult? preprocessed;
     String targetImagePath = imagePath;
+    String englishText = '';
+    bool englishSuccess = false;
+    String? englishError;
 
     try {
-      // 1. IMAGE PRE-PROCESSING
+      // 1. IMAGE PREPROCESSING FOR MAXIMUM OCR ACCURACY
       try {
         preprocessed = await _preprocessingService.preprocess(imagePath);
         targetImagePath = preprocessed.file.path;
@@ -136,82 +71,39 @@ class TextRecognitionService {
         targetImagePath = imagePath;
       }
 
-      // 2. ENGLISH OCR VIA GOOGLE ML KIT
+      // 2. GOOGLE ML KIT TEXT RECOGNITION (100% OFFLINE)
       final recognizer = TextRecognizer(
         script: TextRecognitionScript.latin,
       );
 
       try {
-        final image = InputImage.fromFilePath(targetImagePath);
-        final result = await recognizer.processImage(image);
+        final inputImage = InputImage.fromFilePath(targetImagePath);
+        final recognizedText = await recognizer.processImage(inputImage);
 
-        if (result.blocks.isNotEmpty) {
-          englishText = reconstructText(result);
+        if (recognizedText.blocks.isNotEmpty) {
+          englishText = reconstructText(recognizedText);
         }
-        englishSuccess = true;
+        englishSuccess = englishText.trim().isNotEmpty;
       } catch (e) {
-        englishError = 'English OCR Error: $e';
+        englishError = 'Text recognition error: $e';
         englishSuccess = false;
       } finally {
         await recognizer.close();
       }
 
-      // 3. BILINGUAL URDU & ENGLISH OCR VIA TESSERACT (urd+eng)
-      final isMobilePlatform =
-          !kIsWeb && (Platform.isAndroid || Platform.isIOS);
-
-      if (!isMobilePlatform) {
-        urduError =
-            'Urdu offline OCR (Tesseract) is supported on Android and iOS devices.';
-        urduSuccess = false;
-      } else {
-        try {
-          // Load BOTH urd and eng models simultaneously so Tesseract never confuses English words as Urdu numbers
-          final config = OCRConfig(
-            language: 'urd+eng',
-            engine: OCREngine.tesseract,
-          );
-
-          final rawBilingual = await TesseractOcr.extractText(
-            targetImagePath,
-            config: config,
-          );
-
-          final cleanedBilingual = _cleanUrduOcrText(rawBilingual);
-          if (_hasMeaningfulUrdu(cleanedBilingual)) {
-            urduText = cleanedBilingual;
-            urduSuccess = true;
-          } else {
-            // Discard noise and hallucinated characters when there is no genuine Urdu
-            urduText = '';
-            urduSuccess = false;
-          }
-        } catch (e) {
-          urduError = 'Urdu recognition failed: $e';
-          urduSuccess = false;
-        }
-      }
-
-      // Clean ML Kit Latin noise (ML Kit tries to turn Urdu Nastaliq strokes into gibberish Latin characters)
-      final cleanedEnglish = _filterLatinNoiseFromUrdu(englishText);
-
-      // 4. COMBINE INTELLIGENTLY
-      final combined = _combineExtractedTexts(
-        englishText: cleanedEnglish,
-        urduText: urduText.trim(),
-      );
+      // 3. CLEAN & NORMALIZE TEXT
+      final cleanedText = _cleanExtractedEnglishText(englishText);
 
       return RecognitionResult(
-        combinedText: combined,
-        englishText: cleanedEnglish,
-        urduText: urduText.trim(),
-        englishSuccess: englishSuccess && cleanedEnglish.isNotEmpty,
-        urduSuccess: urduSuccess,
-        urduError: urduError,
+        combinedText: cleanedText,
+        englishText: cleanedText,
+        urduText: '',
+        englishSuccess: cleanedText.isNotEmpty,
+        urduSuccess: false,
         englishError: englishError,
         preprocessingMetadata: preprocessed?.metadata,
         engineType: RecognitionEngineType.offlineMLKit,
-        engineNotice: notice,
+        engineNotice: 'Extracted with On-Device AI Engine (100% Offline)',
       );
     } finally {
       if (preprocessed != null) {
@@ -220,45 +112,10 @@ class TextRecognitionService {
     }
   }
 
-  /// Intelligently combines English and Urdu extracted text.
-  String _combineExtractedTexts({
-    required String englishText,
-    required String urduText,
-  }) {
-    final cleanedEnglish = _filterLatinNoiseFromUrdu(englishText);
+  /// Filters out stray non-English symbols or noise from non-Latin scripts
+  String _cleanExtractedEnglishText(String text) {
+    if (text.trim().isEmpty) return '';
 
-    if (cleanedEnglish.isEmpty && urduText.isEmpty) return '';
-    if (cleanedEnglish.isEmpty) return urduText;
-    if (urduText.isEmpty) return cleanedEnglish;
-
-    // Check if urduText (from bilingual Tesseract urd+eng) already includes the English text
-    final urduLower = urduText.toLowerCase();
-    final englishWords = cleanedEnglish
-        .split(RegExp(r'\s+'))
-        .where((w) => w.length >= 4)
-        .toList();
-
-    int matchedWords = 0;
-    for (final word in englishWords) {
-      if (urduLower.contains(word.toLowerCase())) {
-        matchedWords++;
-      }
-    }
-
-    // If majority of English words are already in the bilingual text,
-    // the bilingual text already accurately preserves the natural mixed paragraph.
-    if (englishWords.isNotEmpty &&
-        matchedWords >= (englishWords.length * 0.4).round()) {
-      return urduText;
-    }
-
-    return [
-      cleanedEnglish,
-      urduText,
-    ].where((t) => t.isNotEmpty).join('\n\n');
-  }
-
-  String _filterLatinNoiseFromUrdu(String text) {
     final lines = text.split('\n');
     final validLines = <String>[];
 
@@ -266,12 +123,13 @@ class TextRecognitionService {
       final trimmed = line.trim();
       if (trimmed.isEmpty) continue;
 
+      // Skip lines that are just symbols/brackets
       if (RegExp(r'^[\W_\|\\/\[\]\<\>\-\+\=~`]{1,4}$').hasMatch(trimmed)) {
         continue;
       }
 
-      // Filter out ML Kit Latin gibberish produced from reading Urdu Nastaliq strokes
-      if (_isMlKitUrduHallucination(trimmed)) {
+      // Skip non-Latin noise hallucination
+      if (_isNonLatinNoise(trimmed)) {
         continue;
       }
 
@@ -281,13 +139,12 @@ class TextRecognitionService {
     return validLines.join('\n').trim();
   }
 
-  bool _isMlKitUrduHallucination(String line) {
-    // A. Foreign/accented characters uncommon in English but characteristic of ML Kit reading Urdu
+  bool _isNonLatinNoise(String line) {
+    // Foreign/accented characters uncommon in English but characteristic of reading non-Latin scripts
     final accentedMatches =
         RegExp(r'[õüöèòüïëãñîôûàáìíùúýÿ]').allMatches(line).length;
     if (accentedMatches >= 1) return true;
 
-    // B. Check word characteristics
     final words = line.split(RegExp(r'\s+'));
     if (words.length >= 3) {
       int vowellessCount = 0;
@@ -304,7 +161,6 @@ class TextRecognitionService {
           singleLetterCount++;
         }
 
-        // Vowelless strings of 3+ letters (e.g. "uswj", "jwl", "bg4", "SIBIgS")
         if (lettersOnly.length >= 3 &&
             !RegExp(r'[aeiouyAEIOUY]').hasMatch(lettersOnly)) {
           vowellessCount++;
@@ -319,107 +175,7 @@ class TextRecognitionService {
     return false;
   }
 
-  String _cleanUrduOcrText(String text) {
-    String cleaned = text.trim();
-    cleaned = cleaned.replaceAll(RegExp(r'[\u200B-\u200D\uFEFF]'), '');
-    cleaned = cleaned.replaceAll(RegExp(r'\n{3,}'), '\n\n');
-    cleaned = cleaned.replaceAll('ك', 'ک').replaceAll('ي', 'ی');
-
-    // Separate boundary when English words touch Urdu words directly (e.g. "dedicationاور" -> "dedication اور")
-    cleaned = cleaned.replaceAllMapped(
-      RegExp(r'([a-zA-Z]+)([\u0600-\u06FF]+)'),
-      (m) => '${m.group(1)} ${m.group(2)}',
-    );
-    cleaned = cleaned.replaceAllMapped(
-      RegExp(r'([\u0600-\u06FF]+)([a-zA-Z]+)'),
-      (m) => '${m.group(1)} ${m.group(2)}',
-    );
-
-    // Filter out isolated 1-3 letter Latin artifacts produced by Tesseract reading Urdu Nastaliq strokes
-    cleaned = _cleanTesseractBilingualArtifacts(cleaned);
-
-    return cleaned.trim();
-  }
-
-  /// Removes stray isolated 1-3 letter Latin noise tokens (e.g. "GS dob", "yl SL", "ig", "GI", "ob")
-  /// that are artifacts of Tesseract's English model misinterpreting Urdu Nastaliq ligatures,
-  /// while strictly preserving authentic English sentences and words.
-  String _cleanTesseractBilingualArtifacts(String text) {
-    const validShortWords = {
-      'a', 'i', 'an', 'as', 'at', 'be', 'by', 'do', 'go', 'he', 'if', 'in',
-      'is', 'it', 'me', 'my', 'no', 'of', 'on', 'or', 'so', 'to', 'up', 'us',
-      'we', 'all', 'and', 'any', 'are', 'bad', 'but', 'can', 'day', 'did',
-      'for', 'get', 'had', 'has', 'her', 'him', 'his', 'how', 'its', 'let',
-      'may', 'new', 'not', 'now', 'off', 'old', 'one', 'our', 'out', 'say',
-      'see', 'she', 'the', 'too', 'two', 'use', 'way', 'who', 'why', 'yes',
-      'you',
-    };
-
-    final urduRegex =
-        RegExp(r'[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]');
-
-    final lines = text.split('\n');
-    final cleanedLines = <String>[];
-
-    for (final line in lines) {
-      final trimmed = line.trim();
-      if (trimmed.isEmpty) {
-        cleanedLines.add('');
-        continue;
-      }
-
-      // If the line has no Urdu at all, keep it as is
-      if (!urduRegex.hasMatch(trimmed)) {
-        cleanedLines.add(line);
-        continue;
-      }
-
-      final tokens = trimmed.split(RegExp(r'\s+'));
-      final cleanedTokens = <String>[];
-
-      for (int i = 0; i < tokens.length; i++) {
-        final token = tokens[i];
-        final cleanToken =
-            token.replaceAll(RegExp(r'[^a-zA-Z]'), '').toLowerCase();
-
-        // Check if it's an isolated 1-3 letter Latin token
-        if (cleanToken.isNotEmpty &&
-            cleanToken.length <= 3 &&
-            !validShortWords.contains(cleanToken)) {
-          final prevHasUrdu = i > 0 && urduRegex.hasMatch(tokens[i - 1]);
-          final nextHasUrdu =
-              (i + 1 < tokens.length) && urduRegex.hasMatch(tokens[i + 1]);
-
-          // If adjacent to Urdu on either side, it is an OCR noise artifact
-          if (prevHasUrdu || nextHasUrdu || tokens.length <= 4) {
-            continue;
-          }
-        }
-
-        cleanedTokens.add(token);
-      }
-
-      cleanedLines.add(cleanedTokens.join(' '));
-    }
-
-    return cleanedLines.join('\n');
-  }
-
-  /// Verifies if text actually contains meaningful Urdu words,
-  /// filtering out stray Tesseract OCR noise or hallucinated single characters.
-  bool _hasMeaningfulUrdu(String text) {
-    if (text.trim().isEmpty) return false;
-    final urduRegex =
-        RegExp(r'[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]');
-    final matches = urduRegex.allMatches(text);
-    // At least 3 Urdu characters required
-    if (matches.length < 3) return false;
-
-    // Must contain at least one valid Urdu word (2 or more Urdu letters together)
-    final urduWordRegex = RegExp(r'[\u0600-\u06FF]{2,}');
-    return urduWordRegex.hasMatch(text);
-  }
-
+  /// Reconstructs the exact visual reading layout from RecognizedText blocks
   String reconstructText(RecognizedText recognizedText) {
     final rawLines = <RecognizedLineData>[];
 
@@ -446,6 +202,7 @@ class TextRecognitionService {
     return formatLines(rawLines);
   }
 
+  /// Formats lines into visual rows and preserves paragraphs and horizontal order
   String formatLines(List<RecognizedLineData> rawLines) {
     if (rawLines.isEmpty) return '';
 

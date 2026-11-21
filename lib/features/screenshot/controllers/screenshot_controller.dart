@@ -193,17 +193,6 @@ class ScreenshotController extends GetxController {
 
     if (image == null) return;
 
-    // Check internet connection
-    final isOnline = await _textService.hasInternetConnection();
-
-    if (!isOnline) {
-      final shouldContinueOffline = await _showNoInternetDialog();
-      if (!shouldContinueOffline) {
-        // User decided to connect to internet first
-        return;
-      }
-    }
-
     try {
       isProcessing.value = true;
 
@@ -212,31 +201,13 @@ class ScreenshotController extends GetxController {
       );
 
       if (!result.hasAnyText) {
-        String message = 'We could not detect any text in this image.';
-        if (result.hasUrduFailure) {
-          message += '\nNote: ${result.urduError}';
-        }
         Get.snackbar(
           'No Text Found',
-          message,
+          'We could not detect any readable English text in this image.',
           snackPosition: SnackPosition.BOTTOM,
           duration: const Duration(seconds: 4),
         );
         return;
-      }
-
-      // If Urdu failed but English extracted text, alert the user explicitly
-      if (result.hasUrduFailure) {
-        Get.snackbar(
-          'Urdu OCR Notice',
-          result.urduError!,
-          backgroundColor: const Color(0xFFE65100),
-          colorText: Colors.white,
-          duration: const Duration(seconds: 5),
-          snackPosition: SnackPosition.BOTTOM,
-          margin: const EdgeInsets.all(14),
-          icon: const Icon(Icons.info_outline, color: Colors.white),
-        );
       }
 
       Get.to(
@@ -254,104 +225,6 @@ class ScreenshotController extends GetxController {
     } finally {
       isProcessing.value = false;
     }
-  }
-
-  Future<bool> _showNoInternetDialog() async {
-    final choice = await Get.dialog<bool>(
-      AlertDialog(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(22),
-        ),
-        contentPadding: const EdgeInsets.fromLTRB(24, 24, 24, 12),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              height: 65,
-              width: 65,
-              decoration: BoxDecoration(
-                color: const Color(0xFFF57C00).withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: const Icon(
-                Icons.wifi_off_rounded,
-                color: Color(0xFFF57C00),
-                size: 34,
-              ),
-            ),
-            const SizedBox(height: 18),
-            const Text(
-              'No Internet Connection',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              'Behtareen aur 100% accurate results (khusoosan Urdu Nastaliq) ke liye internet use karein.\n\n'
-              'For 100% precision and complete Urdu text extraction, an active internet connection is recommended.',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 13,
-                height: 1.5,
-                color: Colors.grey.shade700,
-              ),
-            ),
-          ],
-        ),
-        actionsPadding: const EdgeInsets.fromLTRB(20, 8, 20, 18),
-        actions: [
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton.icon(
-              onPressed: () {
-                Get.back<bool>(result: false);
-              },
-              icon: const Icon(Icons.wifi, size: 18),
-              label: const Text(
-                'Connect to Internet',
-                style: TextStyle(fontWeight: FontWeight.bold),
-              ),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF6254E8),
-                foregroundColor: Colors.white,
-                elevation: 0,
-                padding: const EdgeInsets.symmetric(vertical: 13),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(13),
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 6),
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton(
-              onPressed: () {
-                Get.back<bool>(result: true);
-              },
-              style: OutlinedButton.styleFrom(
-                foregroundColor: Colors.grey.shade800,
-                side: BorderSide(color: Colors.grey.shade300),
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(13),
-                ),
-              ),
-              child: const Text(
-                'Continue with Offline Mode',
-                style: TextStyle(fontWeight: FontWeight.w600),
-              ),
-            ),
-          ),
-        ],
-      ),
-      barrierDismissible: true,
-    );
-
-    return choice ?? false;
   }
 
   void removeScreenshot() {
