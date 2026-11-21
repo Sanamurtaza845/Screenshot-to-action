@@ -112,7 +112,7 @@ class TextRecognitionService {
     }
   }
 
-  /// Filters out stray non-English symbols or noise from non-Latin scripts
+  /// Filters out empty lines and pure symbol noise lines
   String _cleanExtractedEnglishText(String text) {
     if (text.trim().isEmpty) return '';
 
@@ -123,13 +123,8 @@ class TextRecognitionService {
       final trimmed = line.trim();
       if (trimmed.isEmpty) continue;
 
-      // Skip lines that are just symbols/brackets
+      // Skip lines that are just symbols/brackets/delimiters
       if (RegExp(r'^[\W_\|\\/\[\]\<\>\-\+\=~`]{1,4}$').hasMatch(trimmed)) {
-        continue;
-      }
-
-      // Skip non-Latin noise hallucination
-      if (_isNonLatinNoise(trimmed)) {
         continue;
       }
 
@@ -137,42 +132,6 @@ class TextRecognitionService {
     }
 
     return validLines.join('\n').trim();
-  }
-
-  bool _isNonLatinNoise(String line) {
-    // Foreign/accented characters uncommon in English but characteristic of reading non-Latin scripts
-    final accentedMatches =
-        RegExp(r'[õüöèòüïëãñîôûàáìíùúýÿ]').allMatches(line).length;
-    if (accentedMatches >= 1) return true;
-
-    final words = line.split(RegExp(r'\s+'));
-    if (words.length >= 3) {
-      int vowellessCount = 0;
-      int singleLetterCount = 0;
-
-      for (final w in words) {
-        final lettersOnly = w.replaceAll(RegExp(r'[^a-zA-Z]'), '');
-        if (lettersOnly.isEmpty) continue;
-
-        if (lettersOnly.length == 1 &&
-            lettersOnly != 'a' &&
-            lettersOnly != 'A' &&
-            lettersOnly != 'I') {
-          singleLetterCount++;
-        }
-
-        if (lettersOnly.length >= 3 &&
-            !RegExp(r'[aeiouyAEIOUY]').hasMatch(lettersOnly)) {
-          vowellessCount++;
-        }
-      }
-
-      if (vowellessCount >= 1 && singleLetterCount >= 2) return true;
-      if (singleLetterCount >= 3) return true;
-      if (vowellessCount >= 2) return true;
-    }
-
-    return false;
   }
 
   /// Reconstructs the exact visual reading layout from RecognizedText blocks
