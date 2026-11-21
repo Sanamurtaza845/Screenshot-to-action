@@ -1,4 +1,4 @@
-package com.example.screenshot_to_action
+package com.innovexa.screenshottoaction
 
 import io.flutter.embedding.android.FlutterActivity
 
