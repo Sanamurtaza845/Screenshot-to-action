@@ -3,6 +3,7 @@ import 'package:get/get.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../screenshot/controllers/screenshot_controller.dart';
+import '../../history/views/history_view.dart';
 
 class HomeView extends StatelessWidget {
   const HomeView({super.key});
@@ -44,6 +45,15 @@ class HomeView extends StatelessWidget {
             ),
           ],
         ),
+        actions: [
+  IconButton(
+    tooltip: 'History',
+    icon: const Icon(Icons.history),
+    onPressed: () {
+      Get.to(() => const HistoryView());
+    },
+  ),
+],
       ),
       body: SafeArea(
         child: SingleChildScrollView(

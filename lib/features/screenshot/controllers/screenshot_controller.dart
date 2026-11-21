@@ -210,12 +210,11 @@ class ScreenshotController extends GetxController {
         return;
       }
 
-      Get.to(
-        () => ResultsView(
-          extractedText: result.combinedText,
-          recognitionResult: result,
-        ),
-      );
+     Get.to(() => ResultsView(
+  extractedText: result.combinedText,
+  recognitionResult: result,
+  imagePath: image.path,
+));
     } catch (e) {
       Get.snackbar(
         'Recognition Failed',

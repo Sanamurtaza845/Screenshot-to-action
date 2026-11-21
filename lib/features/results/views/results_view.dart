@@ -7,15 +7,23 @@ import '../../screenshot/services/action_detection_service.dart';
 import '../../screenshot/services/image_preprocessing_service.dart';
 import '../../screenshot/services/text_recognition_service.dart';
 import 'package:add_2_calendar/add_2_calendar.dart';
+import 'package:get/get.dart';
+
+import '../../history/controllers/history_controller.dart';
+import '../../screenshot/controllers/screenshot_controller.dart';
 
 class ResultsView extends StatelessWidget {
   final String extractedText;
   final RecognitionResult? recognitionResult;
+  final String imagePath;
+  final bool isHistoryItem;
 
   ResultsView({
     super.key,
     required this.extractedText,
+    required this.imagePath,
     this.recognitionResult,
+    this.isHistoryItem = false,
   });
 
   final ActionDetectionService _detector = ActionDetectionService();
@@ -33,7 +41,9 @@ class ResultsView extends StatelessWidget {
 
     final totalDetected =
         phones.length + websites.length + addresses.length + dates.length;
-
+final historyController = Get.isRegistered<HistoryController>()
+    ? Get.find<HistoryController>()
+    : Get.put(HistoryController());
     return Scaffold(
       backgroundColor: _background,
       appBar: AppBar(
@@ -50,6 +60,46 @@ class ResultsView extends StatelessWidget {
           ),
         ),
         iconTheme: const IconThemeData(color: _text),
+      actions: [
+  if (!isHistoryItem)
+    Obx(() {
+      final isSaving = historyController.isSaving.value;
+
+      return Padding(
+        padding: const EdgeInsets.only(right: 8),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 155),
+          child: TextButton.icon(
+            onPressed: isSaving
+                ? null
+                : () {
+                    _saveToHistory(
+                      context,
+                      phones,
+                      websites,
+                      addresses,
+                      dates,
+                    );
+                  },
+            icon: isSaving
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                    ),
+                  )
+                : const Icon(Icons.bookmark_add_outlined),
+            label: Text(
+              isSaving ? 'Saving...' : 'Save',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ),
+      );
+    }),
+],
       ),
       body: SafeArea(
         child: Column(
@@ -249,6 +299,51 @@ _buildSection(
       ),
     );
   }
+  Future<void> _saveToHistory(
+  BuildContext context,
+  List<String> phones,
+  List<String> websites,
+  List<String> addresses,
+  List<String> dates,
+) async {
+  final historyController = Get.isRegistered<HistoryController>()
+      ? Get.find<HistoryController>()
+      : Get.put(HistoryController());
+
+  final success = await historyController.saveHistory(
+    imagePath: imagePath,
+    extractedText: extractedText,
+    phoneNumbers: phones,
+    websites: websites,
+    addresses: addresses,
+    dates: dates,
+  );
+
+  if (!context.mounted) return;
+
+ if (success) {
+  Get.find<ScreenshotController>().removeScreenshot();
+  Get.back();
+
+  ScaffoldMessenger.of(context).showSnackBar(
+    const SnackBar(
+      content: Text('Saved to History successfully!'),
+      backgroundColor:  AppTheme.primaryColor,
+      behavior: SnackBarBehavior.floating,
+      duration: Duration(seconds: 2),
+    ),
+  );
+} else {
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(
+      content: Text(
+        historyController.errorMessage.value ??
+            'Unable to save to History.',
+      ),
+    ),
+  );
+} 
+}
 Future<void> _showCalendarEventDialog(
   BuildContext context,
   String detectedText,
@@ -957,7 +1052,7 @@ DateTime _parseDetectedDate(String text) {
             children: [
               Container(
                 padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                    const EdgeInsets.symmetric( vertical: 5),
                 decoration: BoxDecoration(
                   color: const Color(0xFF6254E8).withValues(alpha: 0.10),
                   borderRadius: BorderRadius.circular(8),
@@ -990,7 +1085,7 @@ DateTime _parseDetectedDate(String text) {
                 label: const Text('Copy', style: TextStyle(fontSize: 12)),
                 style: TextButton.styleFrom(
                   padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
                   minimumSize: Size.zero,
                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
